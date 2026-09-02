@@ -12,6 +12,8 @@ Project: https://github.com/WinterStatic/MPV-WinterStatic-Edition
 The player is designed to stay small, portable, and usable on older Windows PCs
 without requiring Qt.
 
+![MPV WinterStatic Edition Screenshot](mpv-winterstatic-edition-screenshot.png)
+
 WHAT IS IN THIS BUILD KIT
 -------------------------
 
