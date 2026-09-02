@@ -1,3 +1,4 @@
+[README.md](https://github.com/user-attachments/files/31760161/README.md)
 MPV WinterStatic Edition
 Version 0.4.5
 ===================
@@ -346,19 +347,6 @@ The About dialog also credits:
 The line "MPC-style native frontend powered by libmpv" describes the interface
 style only. The native frontend source is separate from MPC-QT.
 
-0.2.23 HOUSEKEEPING
--------------------
-
-- Rewrote this README so current behavior and file names are accurate.
-- Removed the temporary settings-path diagnostic file.
-- Removed the unused portable.ini file.
-- The finished portable folder now includes THIRD-PARTY-NOTICE.txt.
-- Removed the redundant settings save from WM_CLOSE. WM_DESTROY remains the
-  shutdown save path and still covers File -> Exit.
-- Changed the About/build wording to simply "Version".
-- Changed class-icon loading to the shared LoadIconW path, avoiding an owned
-  process-lifetime icon handle.
-- No playback or UI behavior was intentionally changed in this release.
 
 LICENSING
 ---------
@@ -379,159 +367,8 @@ treat an upstream-project link alone as a substitute for the release's source
 compliance work.
 
 
-0.2.24 compile fix
-------------------
-Restores RectTouchesAnyMonitor(), which was accidentally removed during the
-0.2.23 housekeeping cleanup while LoadSettings() still depended on it.
-No playback, UI, settings, or packaging behavior is otherwise changed.
-
-
-0.2.25 TRACK CYCLING / MPV.CONF
---------------------------------
-- A cycles available audio tracks and wraps back to the first.
-- S cycles subtitles from Off through each subtitle track and back to Off.
-- Track changes show a brief OSD confirmation.
-- Added View -> mpv configuration -> Open mpv.conf.
-- The player loads only its own mpv.conf beside the EXE at startup; normal
-  standalone-mpv config discovery remains disabled.
-- The portable build includes a commented mpv.conf template.
-- Presets are intentionally deferred to a later version.
-
-
-0.2.26 MPV.CONF NOTEPAD FIX
------------------------------
-- Fixes View -> mpv configuration -> Open mpv.conf passing an over-escaped
-  quoted filename to Notepad. The file path is now quoted normally, so paths
-  containing spaces open correctly.
-- No playback, track-cycling, config-loading, or UI behavior is otherwise changed.
-
-
-0.2.27 REMEMBERED TRACK SELECTION
----------------------------------
-- Preferred audio/subtitle language defaults are now blank. They remain
-  available as optional fallbacks in Options.
-- Deliberate audio selections made with A, the AUD button/menu, or the
-  right-click Audio tracks submenu are remembered by language + title.
-- Deliberate subtitle selections made with S, the SUB button/menu, or the
-  right-click Subtitle tracks submenu are remembered the same way.
-- Subtitle Off is remembered as an explicit choice.
-- After the next file reaches libmpv's FILE_LOADED event, the player first
-  tries the exact remembered title/language, then title, then language.
-- If no remembered match exists, the optional preferred-language setting
-  and normal mpv selection remain untouched as the fallback.
-- Automatic file-load selection never overwrites the remembered choice.
-
-
-0.2.28 AUTO NEXT FILE
----------------------
-- Added an AUTO toolbar toggle for continuous folder playback.
-- AUTO is off by default and its state is remembered between sessions.
-- Disabled AUTO text is dim grey; enabled AUTO text uses the same normal
-  colour as the other toolbar buttons. No teal active state is used.
-- Added a checked/unchecked right-click item: Auto-play next file in folder.
-- When playback naturally reaches EOF with AUTO enabled, the next supported
-  media file in the same folder is opened automatically.
-- Folder files use Windows Explorer-style logical filename ordering, so
-  names such as Episode 2 sort before Episode 10.
-- The final file in a folder remains at its end; AUTO does not wrap around.
-- Seeking/scrubbing directly to the end does not count as a natural finish.
-- Existing chapter skip, seek, remembered audio/subtitle selection, and
-  mpv.conf behavior are unchanged.
-
-
-0.2.29 AUTO POLISH
-------------------
-- AUTO-advanced files now explicitly clear mpv's EOF pause state so the
-  next file begins playing instead of opening paused.
-- The disabled AUTO label now uses a darker dedicated grey (RGB 105/105/105)
-  so the off/on state is easier to distinguish at a glance.
-- AUTO enabled text remains the same normal colour as the other buttons.
-- No other playback, track-memory, config, seek, or chapter behavior changed.
-
-
-0.2.30 MAINTENANCE / BUILDER PASS
----------------------------------
-- Fixed the manual-seek-to-EOF AUTO suppression edge case. A deliberate
-  seek to the end remains suppressed until the playhead actually moves
-  back away from EOF, even if eof-reached updates a polling tick later.
-- Media Info now distinguishes libmpv-not-initialized from no-media-loaded.
-- Media Info explicitly enables mpv's builtin stats overlay and verifies
-  that the stats script registered through input-bindings before toggling.
-- Kept Media Info's dedicated top-left safe margins; the builtin stats
-  overlay uses top-left ASS alignment and normal OSD output by default.
-- Replaced repeated whole-folder runtime dependency scans with a queue-based
-  traversal. Each copied DLL is dependency-expanded once, followed by the
-  same final missing-dependency verification.
-- build-native.bat now checks portable-folder creation, required file copies,
-  and generated settings/build-info files before reporting success.
-- Removed the stale resource.h entry from the README.
-- The proven custom settings.ini implementation is intentionally unchanged;
-  its immediate track-memory writes are negligible for this tiny file.
-
-
-0.2.31 NATIVE PLAYLIST
-----------------------
-- Added native libmpv playlist support without introducing a second frontend
-  queue model. mpv remains the authoritative playlist owner.
-- File -> Open now supports selecting multiple media files. The first selection
-  replaces the current queue and the remaining files are appended to mpv's
-  internal playlist.
-- Drag-and-drop now accepts multiple files and builds the playlist the same way.
-- Passing multiple files on the command line also builds a playlist.
-- Added a PLAYLIST bottom-bar button. Clicking it uses mpv's native
-  `show-text ${playlist}` OSD for a temporary playlist view.
-- Added the adjacent triangle button, which opens a native clickable playlist
-  popup. The active/current entry is checked; clicking another entry uses
-  `playlist-play-index`.
-- Added a cascading Playlist submenu to the video right-click menu. It shares
-  the same menu builder as the triangle popup so both views stay consistent.
-- Added playlist navigation shortcuts aimed at both VLC and MPC muscle memory:
-    Page Up / Ctrl+Up   previous playlist item
-    Page Down / Ctrl+Down next playlist item
-    P                   show playlist OSD
-- Existing Up/Down volume shortcuts remain unchanged when Ctrl is not held.
-- Existing bottom-bar Previous/Next buttons remain chapter navigation only.
-- Per-file frontend state now resynchronizes at MPV_EVENT_FILE_LOADED, including
-  current path/window title, chapter markers, EOF/AUTO state, and remembered
-  track restoration. This also covers mpv-internal playlist auto-advance.
-- AUTO folder scanning is suppressed whenever mpv has a multi-entry playlist,
-  so an explicit manual queue always takes priority. Normal single-file loads
-  restore the existing AUTO behavior.
-- keep-open=yes remains unchanged: mpv advances normally between playlist items
-  and holds only when the true end of the playlist is reached.
-- Customizable keybindings in Options are intentionally deferred to a later
-  release; 0.2.31 keeps the shortcuts hard-coded.
-
-
-0.2.32 PLAYLIST OSD / BUILD SCRIPT HOTFIX
------------------------------------------
-- Fixed the PLAYLIST OSD showing the literal text `${playlist}` instead of the
-  expanded mpv playlist. libmpv array commands disable property expansion by
-  default, so the OSD command now uses the `expand-properties` prefix.
-- Re-saved build-native.bat as UTF-8 without a BOM and with CRLF line endings.
-  The BOM had caused cmd.exe to misread the first `@echo off`, leaving command
-  echoing enabled even though the rest of the build could still succeed.
-- No playlist architecture or control behavior changed from 0.2.31.
-
-
-0.2.33 PLAYLIST OSD TOGGLE / COMPACT VIEW
------------------------------------------
-- P and the bottom PLAYLIST button now act as true toggles: first press shows
-  the playlist and the next press hides it.
-- The toggled playlist no longer disappears on a timer. It uses mpv's persistent
-  OSD message path and stays visible until explicitly toggled off.
-- Playlist text now uses its own compact font size (roughly half the configured
-  normal OSD size, bounded for readability), so multi-line playlists no longer
-  inherit the intentionally large volume/seek OSD text.
-- The normal OSD font size remains unchanged for volume, seek, speed, and other
-  transient status messages.
-- The gold/current playlist item remains supplied by mpv's native playlist
-  formatting.
-- Playlist navigation still gives a short playlist preview when the persistent
-  playlist OSD is hidden; when it is already visible, FILE_LOADED refreshes the
-  persistent view instead.
-
-
+VERSION HISTORY
+---------------
 
 0.4.5 RELEASE SOURCE AUTOMATION
 --------------------------------
@@ -575,13 +412,8 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
   GPU, seek, fullscreen, runtime contents, or licensing behavior is changed.
 
 
-0.4.3 WINTERSTATIC PUBLIC REBRAND
-----------------------------------
-- Renamed the application and public project identity to MPV WinterStatic Edition
-  before the first GitHub release.
-- Renamed the executable, portable package, Windows resource metadata, manifest
-  identity, LocalAppData fallback folder, generated mpv.conf comments, build
-  script labels, and documentation to the WinterStatic name.
+0.4.3 GITHUB PROJECT INTEGRATION
+--------------------------------
 - Added the official project repository URL:
     https://github.com/WinterStatic/MPV-WinterStatic-Edition
 - Added a GitHub button to the About dialog that opens the project repository.
@@ -783,6 +615,7 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
   choices. The first file in a newly opened playlist is not treated as an
   advance. A manually toggled persistent playlist (P) remains independent.
 
+
 0.2.45 PLAYLIST OVERLAY ESCAPING CLEANUP
 ------------------------------------------
 - No behavior/layout changes from the confirmed-working 0.2.44 bounded
@@ -940,6 +773,7 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Stops property expansion before playlist ASS tags and literal media titles.
 - Keeps the 0.2.34 seven-entry moving window, compact playlist-only font, truncation, and selected-item colour.
 
+
 0.2.34 PLAYLIST OSD WINDOWED VIEW
 -----------------------------------
 - Playlist OSD font reduced again to roughly one quarter of the configured
@@ -952,3 +786,170 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
   long episode names cannot wrap repeatedly and push other rows off-screen.
 - The clickable playlist popup/right-click submenu still keeps its fuller labels.
 
+
+0.2.33 PLAYLIST OSD TOGGLE / COMPACT VIEW
+-----------------------------------------
+- P and the bottom PLAYLIST button now act as true toggles: first press shows
+  the playlist and the next press hides it.
+- The toggled playlist no longer disappears on a timer. It uses mpv's persistent
+  OSD message path and stays visible until explicitly toggled off.
+- Playlist text now uses its own compact font size (roughly half the configured
+  normal OSD size, bounded for readability), so multi-line playlists no longer
+  inherit the intentionally large volume/seek OSD text.
+- The normal OSD font size remains unchanged for volume, seek, speed, and other
+  transient status messages.
+- The gold/current playlist item remains supplied by mpv's native playlist
+  formatting.
+- Playlist navigation still gives a short playlist preview when the persistent
+  playlist OSD is hidden; when it is already visible, FILE_LOADED refreshes the
+  persistent view instead.
+
+
+0.2.32 PLAYLIST OSD / BUILD SCRIPT HOTFIX
+-----------------------------------------
+- Fixed the PLAYLIST OSD showing the literal text `${playlist}` instead of the
+  expanded mpv playlist. libmpv array commands disable property expansion by
+  default, so the OSD command now uses the `expand-properties` prefix.
+- Re-saved build-native.bat as UTF-8 without a BOM and with CRLF line endings.
+  The BOM had caused cmd.exe to misread the first `@echo off`, leaving command
+  echoing enabled even though the rest of the build could still succeed.
+- No playlist architecture or control behavior changed from 0.2.31.
+
+
+0.2.31 NATIVE PLAYLIST
+----------------------
+- Added native libmpv playlist support without introducing a second frontend
+  queue model. mpv remains the authoritative playlist owner.
+- File -> Open now supports selecting multiple media files. The first selection
+  replaces the current queue and the remaining files are appended to mpv's
+  internal playlist.
+- Drag-and-drop now accepts multiple files and builds the playlist the same way.
+- Passing multiple files on the command line also builds a playlist.
+- Added a PLAYLIST bottom-bar button. Clicking it uses mpv's native
+  `show-text ${playlist}` OSD for a temporary playlist view.
+- Added the adjacent triangle button, which opens a native clickable playlist
+  popup. The active/current entry is checked; clicking another entry uses
+  `playlist-play-index`.
+- Added a cascading Playlist submenu to the video right-click menu. It shares
+  the same menu builder as the triangle popup so both views stay consistent.
+- Added playlist navigation shortcuts aimed at both VLC and MPC muscle memory:
+    Page Up / Ctrl+Up   previous playlist item
+    Page Down / Ctrl+Down next playlist item
+    P                   show playlist OSD
+- Existing Up/Down volume shortcuts remain unchanged when Ctrl is not held.
+- Existing bottom-bar Previous/Next buttons remain chapter navigation only.
+- Per-file frontend state now resynchronizes at MPV_EVENT_FILE_LOADED, including
+  current path/window title, chapter markers, EOF/AUTO state, and remembered
+  track restoration. This also covers mpv-internal playlist auto-advance.
+- AUTO folder scanning is suppressed whenever mpv has a multi-entry playlist,
+  so an explicit manual queue always takes priority. Normal single-file loads
+  restore the existing AUTO behavior.
+- keep-open=yes remains unchanged: mpv advances normally between playlist items
+  and holds only when the true end of the playlist is reached.
+- Customizable keybindings in Options are intentionally deferred to a later
+  release; 0.2.31 keeps the shortcuts hard-coded.
+
+
+0.2.30 MAINTENANCE / BUILDER PASS
+---------------------------------
+- Fixed the manual-seek-to-EOF AUTO suppression edge case. A deliberate
+  seek to the end remains suppressed until the playhead actually moves
+  back away from EOF, even if eof-reached updates a polling tick later.
+- Media Info now distinguishes libmpv-not-initialized from no-media-loaded.
+- Media Info explicitly enables mpv's builtin stats overlay and verifies
+  that the stats script registered through input-bindings before toggling.
+- Kept Media Info's dedicated top-left safe margins; the builtin stats
+  overlay uses top-left ASS alignment and normal OSD output by default.
+- Replaced repeated whole-folder runtime dependency scans with a queue-based
+  traversal. Each copied DLL is dependency-expanded once, followed by the
+  same final missing-dependency verification.
+- build-native.bat now checks portable-folder creation, required file copies,
+  and generated settings/build-info files before reporting success.
+- Removed the stale resource.h entry from the README.
+- The proven custom settings.ini implementation is intentionally unchanged;
+  its immediate track-memory writes are negligible for this tiny file.
+
+
+0.2.29 AUTO POLISH
+------------------
+- AUTO-advanced files now explicitly clear mpv's EOF pause state so the
+  next file begins playing instead of opening paused.
+- The disabled AUTO label now uses a darker dedicated grey (RGB 105/105/105)
+  so the off/on state is easier to distinguish at a glance.
+- AUTO enabled text remains the same normal colour as the other buttons.
+- No other playback, track-memory, config, seek, or chapter behavior changed.
+
+
+0.2.28 AUTO NEXT FILE
+---------------------
+- Added an AUTO toolbar toggle for continuous folder playback.
+- AUTO is off by default and its state is remembered between sessions.
+- Disabled AUTO text is dim grey; enabled AUTO text uses the same normal
+  colour as the other toolbar buttons. No teal active state is used.
+- Added a checked/unchecked right-click item: Auto-play next file in folder.
+- When playback naturally reaches EOF with AUTO enabled, the next supported
+  media file in the same folder is opened automatically.
+- Folder files use Windows Explorer-style logical filename ordering, so
+  names such as Episode 2 sort before Episode 10.
+- The final file in a folder remains at its end; AUTO does not wrap around.
+- Seeking/scrubbing directly to the end does not count as a natural finish.
+- Existing chapter skip, seek, remembered audio/subtitle selection, and
+  mpv.conf behavior are unchanged.
+
+
+0.2.27 REMEMBERED TRACK SELECTION
+---------------------------------
+- Preferred audio/subtitle language defaults are now blank. They remain
+  available as optional fallbacks in Options.
+- Deliberate audio selections made with A, the AUD button/menu, or the
+  right-click Audio tracks submenu are remembered by language + title.
+- Deliberate subtitle selections made with S, the SUB button/menu, or the
+  right-click Subtitle tracks submenu are remembered the same way.
+- Subtitle Off is remembered as an explicit choice.
+- After the next file reaches libmpv's FILE_LOADED event, the player first
+  tries the exact remembered title/language, then title, then language.
+- If no remembered match exists, the optional preferred-language setting
+  and normal mpv selection remain untouched as the fallback.
+- Automatic file-load selection never overwrites the remembered choice.
+
+
+0.2.26 MPV.CONF NOTEPAD FIX
+-----------------------------
+- Fixes View -> mpv configuration -> Open mpv.conf passing an over-escaped
+  quoted filename to Notepad. The file path is now quoted normally, so paths
+  containing spaces open correctly.
+- No playback, track-cycling, config-loading, or UI behavior is otherwise changed.
+
+
+0.2.25 TRACK CYCLING / MPV.CONF
+--------------------------------
+- A cycles available audio tracks and wraps back to the first.
+- S cycles subtitles from Off through each subtitle track and back to Off.
+- Track changes show a brief OSD confirmation.
+- Added View -> mpv configuration -> Open mpv.conf.
+- The player loads only its own mpv.conf beside the EXE at startup; normal
+  standalone-mpv config discovery remains disabled.
+- The portable build includes a commented mpv.conf template.
+- Presets are intentionally deferred to a later version.
+
+
+0.2.24 compile fix
+------------------
+Restores RectTouchesAnyMonitor(), which was accidentally removed during the
+0.2.23 housekeeping cleanup while LoadSettings() still depended on it.
+No playback, UI, settings, or packaging behavior is otherwise changed.
+
+
+0.2.23 HOUSEKEEPING
+-------------------
+
+- Rewrote this README so current behavior and file names are accurate.
+- Removed the temporary settings-path diagnostic file.
+- Removed the unused portable.ini file.
+- The finished portable folder now includes THIRD-PARTY-NOTICE.txt.
+- Removed the redundant settings save from WM_CLOSE. WM_DESTROY remains the
+  shutdown save path and still covers File -> Exit.
+- Changed the About/build wording to simply "Version".
+- Changed class-icon loading to the shared LoadIconW path, avoiding an owned
+  process-lifetime icon handle.
+- No playback or UI behavior was intentionally changed in this release.
