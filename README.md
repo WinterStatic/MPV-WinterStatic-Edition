@@ -1199,7 +1199,7 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
   MinGW DLL dependencies.
 
 
-  0.1.0 EXPERIMENTAL QT BUILD
+ 0.1.0 EXPERIMENTAL QT BUILD
 ---------------------------
 - Experimental Qt-based frontend prototype.
 - Superseded by the native Win32/libmpv branch introduced in 0.2.0.
