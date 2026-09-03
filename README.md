@@ -955,3 +955,251 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Changed class-icon loading to the shared LoadIconW path, avoiding an owned
   process-lifetime icon handle.
 - No playback or UI behavior was intentionally changed in this release.
+
+
+0.2.22 SETTINGS / BUILD RECOVERY
+--------------------------------
+- Rebuilt from the known-working 0.2.20 source after the 0.2.21 intermediate
+  edit accidentally removed unrelated helper functions.
+- Changed the settings writer to direct CreateFile / WriteFile /
+  FlushFileBuffers output.
+- Added portable-folder preference with a LocalAppData fallback when the
+  application folder is not writable.
+- Added a temporary SETTINGS-PATH.txt diagnostic marker showing which
+  settings.ini the player was using.
+
+
+0.2.21 ABANDONED INTERMEDIATE BUILD
+-----------------------------------
+- Experimental intermediate build.
+- An edit accidentally removed unrelated helper functions, so this version was
+  abandoned rather than used as the next working baseline.
+- Development resumed from the known-good 0.2.20 source for 0.2.22.
+
+
+0.2.20 DIRECT SETTINGS I/O
+--------------------------
+- Replaced GetPrivateProfileString / WritePrivateProfileString settings access
+  with direct C++17 file I/O for settings.ini.
+- Settings are parsed and written by the player itself.
+- Writes use a temporary file plus MoveFileEx(...WRITE_THROUGH) for atomic
+  on-disk replacement.
+- Removed Windows INI caching/mapping from the volume and mute persistence path
+  while retaining a human-readable settings.ini.
+
+
+0.2.19 SETTINGS WRITE-THROUGH
+-----------------------------
+- Defined the fresh-install volume default once as kDefaultVolume instead of
+  repeating the value throughout the source.
+- The builder now explicitly creates settings.ini with the current defaults.
+- Settings writes are explicitly flushed so volume and mute changes are
+  committed before the application exits.
+
+
+0.2.18 AUDIO PERSISTENCE / OSD DEFAULT
+--------------------------------------
+- Fresh installs now default transient OSD placement to Top Left.
+- Volume and mute state are written to settings.ini immediately whenever they
+  change.
+- The complete settings set is also saved from WM_DESTROY so File -> Exit
+  cannot bypass persistence.
+- Settings remain portable beside the EXE.
+
+
+0.2.17 DEFAULTS / MEDIA INFO PLACEMENT
+--------------------------------------
+- Fresh installs now start maximised.
+- Added default preferred audio and subtitle language settings.
+- Media Info now temporarily uses its own DPI-scaled top-left safe position so
+  the multi-line stats overlay has room to fit onscreen.
+- Closing Media Info restores the user's normal OSD position.
+
+
+0.2.16 CONTEXT MENU / MEDIA INFO
+--------------------------------
+- Right-click Audio tracks and Subtitle tracks are now true cascading Win32
+  submenus instead of opening a second popup from the toolbar.
+- Added Options directly to the video context menu.
+- Added Media Info using mpv's bundled stats overlay.
+- Media Info can be toggled from View -> Media info, the right-click menu, or
+  the I key.
+- Falls back to a short OSD message if the stats binding is unavailable in the
+  packaged libmpv build.
+
+
+0.2.15 BRANDING / PERSISTENCE
+-----------------------------
+- Completed the application identity in app.manifest.
+- Renamed the generated portable folder to use the application's product name
+  and version.
+- Updated build and README wording to match.
+- Added persistence for volume and mute state in settings.ini.
+- Internal Win32 class-registration strings were intentionally left unchanged
+  because they are not user-visible.
+
+
+0.2.14 MAINTENANCE
+------------------
+- Added proper draining of libmpv's event queue during polling.
+- Reduced redundant libmpv work by fetching track-list only once per status
+  refresh.
+- Cached seek-bar and chapter-marker brushes instead of recreating them
+  unnecessarily.
+- Added proper cleanup of the edit brush at shutdown.
+- Improved the build script's final portable-folder instructions.
+
+
+0.2.13 CHAPTER / FULLSCREEN VOLUME
+----------------------------------
+- Added MPC-style one-pixel grey chapter markers to the seek bar using
+  libmpv's chapter-list property.
+- Previous / Next controls now step through chapters as intended.
+- Changing volume in fullscreen now shows only the percentage OSD without
+  forcing the bottom control panel to appear.
+
+
+0.2.12 SUBTITLE / OSD CALIBRATION
+---------------------------------
+- Added a persistent Subtitle size option, using mpv's default size of 55.
+- Subtitle-size changes apply live.
+- Improved Top Left OSD compensation for libass glyph-top padding.
+- Applied the same compensation to Golden Centre so the visible OSD lands
+  approximately 38.2% down from the top.
+
+
+0.2.11 OSD POSITION / OPTIONS THEME
+-----------------------------------
+- Top Left OSD now explicitly resets mpv's runtime alignment and margins and
+  uses a small DPI-scaled safe margin.
+- Golden Centre places the OSD approximately 38.2% down from the top.
+- The OSD-position combo box is owner-drawn so both the closed field and
+  dropdown use the player's dark charcoal theme rather than the default white
+  Windows list.
+
+
+  0.2.10 INTERMEDIATE OSD / OPTIONS BUILD
+---------------------------------------
+- Carries forward the OSD-position and Options-theme work from 0.2.9.
+- Top Left OSD explicitly resets mpv alignment and margins and uses a
+  DPI-scaled safe inset.
+- Golden Centre remains positioned approximately 38.2% down from the top.
+- The OSD-position selector retains the dark owner-drawn appearance.
+- No additional behavior change is documented separately for this build.
+
+
+0.2.9 OSD POSITION / OPTIONS THEME
+----------------------------------
+- Top Left OSD now explicitly resets mpv's runtime alignment and margins.
+- Added a small DPI-scaled safe margin from the top and left edges.
+- Golden Centre places transient OSD approximately 38.2% down from the top.
+- The OSD-position combo box is owner-drawn so both its closed field and
+  dropdown list use the player's dark charcoal theme.
+
+
+0.2.8 OPTIONS / OSD / IDENTITY CLEANUP
+--------------------------------------
+- Changed the About window to a silent dark native dialog identifying the
+  player as an MPC-style native frontend powered by libmpv.
+- Correctly wired View -> Options.
+- Added OSD size to the Options dialog.
+- Set the default OSD size to 72 px.
+- Removed an old 24 px OSD override that was silently taking precedence over
+  the newer setting.
+- Window size, position, and maximised state are restored on the next launch.
+
+
+0.2.7 OPTIONS / PERSISTENCE
+---------------------------
+- Added persistence for normal window size, position, and maximised state.
+- Set the default video single-click delay to 64 ms.
+- Enlarged transient OSD text.
+- Simplified volume OSD to a bare percentage.
+- Redrew the mute indicator as a teal speaker-with-slash.
+- Added a compact Options dialog for click delay, OSD position, preferred
+  audio language, and preferred subtitle language.
+- Settings are stored beside the EXE in settings.ini.
+
+
+0.2.6 NATIVE UI POLISH
+----------------------
+- Reduced the video single-click delay to 60 ms.
+- Positioned transient OSD at the golden-ratio point approximately 38.2%
+  down from the top.
+- Changed transient OSD to a clean Segoe UI Semibold style.
+- Simplified track information to compact subtitle/audio language labels.
+- Redrew the speaker and sound waves so they fit fully inside the button.
+
+0.2.5 COMPILE FIX
+-----------------
+- Fixed a Win32 `small` macro collision introduced by the new taskbar-icon
+  code.
+- No intentional interface or playback changes from 0.2.4.
+
+
+0.2.4 NATIVE UI POLISH
+----------------------
+- Reduced single-click Play / Pause delay to 70 ms.
+- Moved transient OSD above the subtitle zone using golden-ratio positioning.
+- Fixed the initial layout squeezing the track/status information.
+- Smoothed the speaker-wave graphics.
+- Added the currently loaded media filename to the window and taskbar title.
+- Added dynamic taskbar Play / Pause icon behavior.
+- Custom File / View / Play / Help menus now switch as the pointer moves
+  between them while a menu is open.
+
+
+0.2.3 PLAYBACK / OSD POLISH
+---------------------------
+- Added libmpv-rendered OSD feedback for seek and volume changes.
+- Reduced the video single-click delay.
+- Tidied the speaker-button silhouette.
+- Kept AUD and SUB controls adjacent to the track information they control.
+
+
+0.2.2 FIRST NATIVE POLISH PASS
+------------------------------
+- Confirmed that native Win32/libmpv video embedding works on the target PC.
+- Refined the MPC-style interface after the initial real-world test.
+- Added a darker elapsed portion to the seek display.
+- Improved transport-control glyphs.
+- Added clearer volume and time readouts.
+- Reduced single-click response time while retaining double-click fullscreen.
+
+
+0.2.1 NATIVE VALIDATION BUILD
+-----------------------------
+- Continued testing of the initial native Win32/libmpv frontend.
+- No separately documented feature changes from 0.2.0.
+- Used to continue validating embedded libmpv playback and the portable
+  runtime on the target Windows system.
+
+
+0.2.0 FIRST NATIVE WIN32 BUILD
+------------------------------
+- Introduced the native Win32 C++ frontend built directly around libmpv.
+- Dynamically loads libmpv-2.dll while using the existing MSYS2 libmpv /
+  FFmpeg runtime.
+- Added real local-file playback.
+- Added File -> Open and drag-and-drop loading.
+- Added the dark charcoal native interface with dark-teal accents.
+- Added the full-width custom seek bar.
+- Added Play / Pause, Stop, Previous / Next, 5-second seek controls, and
+  playback-speed controls.
+- Added real libmpv Audio and Subtitle track menus.
+- Added mute and volume controls, including mouse-wheel and Up / Down volume.
+- Added Space Play / Pause, Left / Right seek, M mute, F / Enter fullscreen,
+  and Escape to leave fullscreen.
+- Added single-click video Play / Pause and double-click fullscreen.
+- Added the video right-click context menu.
+- Added playback state, resolution, audio/subtitle status, and current/total
+  time readouts.
+- Added fullscreen controls that reveal along the bottom edge.
+- Added recursive portable-runtime collection for libmpv / FFmpeg and their
+  MinGW DLL dependencies.
+
+
+  0.1.0 EXPERIMENTAL QT BUILD
+---------------------------
+- Experimental Qt-based frontend prototype.
+- Superseded by the native Win32/libmpv branch introduced in 0.2.0.
