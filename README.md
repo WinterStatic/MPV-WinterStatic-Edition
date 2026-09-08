@@ -1,6 +1,6 @@
 [README.md](https://github.com/user-attachments/files/31760161/README.md)
 MPV WinterStatic Edition
-Version 0.4.5
+Version 0.4.6
 ===================
 
 MPV WinterStatic Edition is a lightweight native Win32 frontend for libmpv.
@@ -371,6 +371,50 @@ compliance work.
 
 VERSION HISTORY
 ---------------
+
+0.4.6 WINDOWS INTEGRATION / NAVIGATION / LOOP / PLAYBACK OSD
+---------------------------------------------------------------
+- Added configurable handling for files opened while another WinterStatic
+  instance is already running: open in the existing instance (default), pause
+  the existing instance and open a new instance, or just open a new instance.
+- Existing-instance handoff uses native WM_COPYDATA messaging with an explicit
+  WinterStatic protocol acknowledgment. Older builds using the same Win32
+  window class cannot be mistaken for a successful receiver; failed/busy
+  handoffs fall back to opening the file normally.
+- Explicitly opened/replacement media now clears stale pause state so the new
+  file starts playing even if the previous file was paused. Natural playlist
+  advancement remains owned by libmpv.
+- When AUTO is enabled without an explicit multi-file playlist, Page Up /
+  Page Down navigate to the previous/next supported file in the current folder
+  using the same Explorer-style ordering as AUTO. Folder navigation does not
+  wrap, and explicit playlists retain priority.
+- Added a session-only LOOP current-file toggle using libmpv's native
+  `loop-file` behavior. LOOP starts Off on every launch, is not persisted, and
+  takes priority over playlist/AUTO advancement and final-EOF fullscreen exit.
+- Added a compact paired-arrow LOOP toolbar glyph reproduced from an approved
+  26x26 pixel silhouette. Enabled and Off states share the same geometry and
+  use the existing normal/dim control colors.
+- Added Windows taskbar thumbnail controls. The default layout is one large
+  Play/Pause button; Options can expose Previous chapter, Stop, Play/Pause,
+  Next chapter, and Fullscreen. All buttons route through the existing player
+  actions and recover correctly if Explorer recreates the taskbar button.
+- Added Media Play/Pause as the default alternate shortcut for Play / Pause.
+  Media-volume keys remain assignable manually but are not default bindings,
+  avoiding simultaneous player-volume and Windows system-volume changes.
+- Added brief VHS-style playback-state feedback for explicit Play/Pause actions:
+  a play triangle when resuming and paired heavy pause bars when pausing. The
+  symbols use the existing transient OSD path (Top Left by default) and appear
+  only after libmpv accepts the requested pause-state change.
+- Added an option to hide the cursor after about two seconds of inactivity over
+  a playing video in windowed mode. It is enabled by default for fresh installs;
+  movement immediately restores the cursor, while pause, mouse-leave, focus loss
+  and active capture keep it visible. Fullscreen cursor handling remains separate.
+- Matched the pause icon's teal color and outer-ring weight to the play icon.
+- Added Options for instance handling and taskbar thumbnail-button layout; these
+  preferences persist through the existing settings system. LOOP deliberately
+  does not persist.
+- No libmpv runtime, resume format, playlist ownership, track-memory, GPU,
+  audio/subtitle sync, or release-source behavior is intentionally changed.
 
 0.4.5 RELEASE SOURCE AUTOMATION
 --------------------------------
