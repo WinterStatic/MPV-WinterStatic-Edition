@@ -14,6 +14,9 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <shobjidl.h>
+#include <shlobj.h>
+#include <objbase.h>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -33,6 +36,8 @@
 #pragma comment(lib, "Comdlg32.lib")
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "Shlwapi.lib")
+#pragma comment(lib, "Ole32.lib")
+#pragma comment(lib, "Uuid.lib")
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "Gdi32.lib")
 
@@ -100,7 +105,7 @@ constexpr wchar_t kVolumeClass[] = L"MPVMPCNativeVolume";
 constexpr wchar_t kOverlayClass[] = L"MPVMPCNativeOverlay";
 
 constexpr wchar_t kAppTitle[] = L"MPV WinterStatic Edition";
-constexpr wchar_t kVersionText[] = L"Version 0.4.5";
+constexpr wchar_t kVersionText[] = L"Version 0.4.7";
 constexpr wchar_t kProjectUrl[] = L"https://github.com/WinterStatic/MPV-WinterStatic-Edition";
 
 constexpr int kMenuHeight = 24;
@@ -137,8 +142,19 @@ constexpr UINT_PTR TIMER_SINGLE_CLICK = 1;
 constexpr UINT_PTR TIMER_FULLSCREEN_HOVER = 2;
 constexpr UINT_PTR TIMER_MPV_POLL = 3;
 constexpr UINT_PTR TIMER_PLAYLIST_OSD_RESTORE = 4;
+constexpr UINT_PTR TIMER_TASKBAR_ACTIVATE = 5;
 constexpr int64_t kPlaylistOverlayId = 1;
 constexpr UINT WM_APP_AUTO_NEXT_FILE = WM_APP + 1;
+
+constexpr ULONG_PTR kCopyDataOpenFiles = 0x57534F46; // "WSOF"
+constexpr ULONG_PTR kCopyDataPausePlayback = 0x57535041; // "WSPA"
+constexpr DWORD_PTR kCopyDataAck = 0x57534143; // "WSAC" - explicit protocol acknowledgment
+constexpr UINT kTaskbarPlayPauseButtonId = 1;
+constexpr UINT kTaskbarPreviousButtonId = 2;
+constexpr UINT kTaskbarStopButtonId = 3;
+constexpr UINT kTaskbarNextButtonId = 4;
+constexpr UINT kTaskbarFullscreenButtonId = 5;
+constexpr size_t kTaskbarButtonCount = 5;
 
 constexpr int IDC_PLAY = 1001;
 constexpr int IDC_STOP = 1002;
@@ -161,6 +177,7 @@ constexpr int IDC_SUB_INFO = 1018;
 constexpr int IDC_AUTO_NEXT = 1019;
 constexpr int IDC_PLAYLIST_OSD = 1020;
 constexpr int IDC_PLAYLIST_MENU = 1021;
+constexpr int IDC_LOOP_CURRENT = 1022;
 
 constexpr int IDM_FILE_OPEN = 2001;
 constexpr int IDM_FILE_EXIT = 2002;
@@ -184,6 +201,8 @@ constexpr int IDM_AUTO_NEXT_FILE = 2019;
 constexpr int IDM_PLAYLIST_SHOW = 2020;
 constexpr int IDM_PLAYLIST_PREV = 2021;
 constexpr int IDM_PLAYLIST_NEXT = 2022;
+constexpr int IDM_LOOP_CURRENT_FILE = 2023;
+constexpr int IDM_FILE_SCREENSHOT = 2024;
 
 // Dedicated ranges for the one-shot right-click cascading track menus.
 // These are intentionally far away from control/menu IDs.
@@ -203,6 +222,12 @@ constexpr int IDC_OPT_PLAYLIST_START_OSD = 3007;
 constexpr int IDC_OPT_GPU_API = 3008;
 constexpr int IDC_OPT_SHORTCUTS = 3009;
 constexpr int IDC_OPT_EXIT_FULLSCREEN_END = 3010;
+constexpr int IDC_OPT_INSTANCE_BEHAVIOR = 3011;
+constexpr int IDC_OPT_HIDE_WINDOWED_CURSOR = 3012;
+constexpr int IDC_OPT_TASKBAR_BUTTONS = 3013;
+constexpr int IDC_OPT_SCREENSHOT_FOLDER = 3014;
+constexpr int IDC_OPT_SCREENSHOT_BROWSE = 3015;
+constexpr int IDC_OPT_SHOW_STOP_BUTTON = 3016;
 
 constexpr int IDC_SHORTCUT_PRIMARY_BASE = 4000;
 constexpr int IDC_SHORTCUT_ALT_BASE = 4100;
@@ -226,6 +251,7 @@ HWND g_next = nullptr;
 HWND g_speedDown = nullptr;
 HWND g_speedUp = nullptr;
 HWND g_autoNext = nullptr;
+HWND g_loopCurrent = nullptr;
 HWND g_playlistOsd = nullptr;
 HWND g_playlistMenu = nullptr;
 HWND g_audio = nullptr;
@@ -254,6 +280,20 @@ HICON g_playIconBig = nullptr;
 HICON g_playIconSmall = nullptr;
 HICON g_pauseIconBig = nullptr;
 HICON g_pauseIconSmall = nullptr;
+HICON g_taskbarPlayIcon = nullptr;
+HICON g_taskbarPauseIcon = nullptr;
+HICON g_taskbarPreviousIcon = nullptr;
+HICON g_taskbarStopIcon = nullptr;
+HICON g_taskbarNextIcon = nullptr;
+HICON g_taskbarFullscreenIcon = nullptr;
+ITaskbarList3* g_taskbarList = nullptr;
+UINT g_taskbarButtonCreatedMsg = 0;
+bool g_taskbarButtonAdded = false;
+bool g_taskbarStateKnown = false;
+bool g_taskbarLastIdle = true;
+bool g_taskbarLastPaused = true;
+bool g_taskbarLastFullControls = false;
+bool g_taskbarLastShowStopButton = false;
 
 enum class OsdPosition {
     GoldenCenter = 0,
@@ -271,6 +311,12 @@ enum class GpuApi {
     D3D11 = 1,
     Vulkan = 2,
     OpenGL = 3
+};
+
+enum class InstanceOpenBehavior {
+    OpenInExisting = 0,
+    PauseExistingAndOpenNew = 1,
+    JustOpenNew = 2
 };
 
 enum class ShortcutAction : size_t {
@@ -301,6 +347,12 @@ enum class ShortcutAction : size_t {
     SubtitleDelayUp,
     ResetSubtitleDelay,
     MediaInfo,
+    ToggleLoopCurrent,
+    PreciseSeekBackward,
+    PreciseSeekForward,
+    TakeScreenshot,
+    PreviousFrame,
+    NextFrame,
     Count
 };
 
@@ -347,7 +399,13 @@ const std::array<ShortcutActionInfo, kShortcutActionCount> kShortcutActionInfo{{
     { L"Subtitle delay -50 ms", L"SubtitleDelayDown" },
     { L"Subtitle delay +50 ms", L"SubtitleDelayUp" },
     { L"Reset subtitle delay", L"ResetSubtitleDelay" },
-    { L"Media Info", L"MediaInfo" }
+    { L"Media Info", L"MediaInfo" },
+    { L"Toggle LOOP current file", L"ToggleLoopCurrent" },
+    { L"Precise seek backward 5 seconds", L"PreciseSeekBackward" },
+    { L"Precise seek forward 5 seconds", L"PreciseSeekForward" },
+    { L"Take screenshot", L"TakeScreenshot" },
+    { L"Previous frame", L"PreviousFrame" },
+    { L"Next frame", L"NextFrame" }
 }};
 
 using ShortcutTable =
@@ -374,7 +432,14 @@ int g_subtitleFontSize = 55;
 OsdPosition g_osdPosition = OsdPosition::TopLeft;
 PlaylistStartOsd g_playlistStartOsd = PlaylistStartOsd::Nothing;
 GpuApi g_gpuApi = GpuApi::Auto;
+InstanceOpenBehavior g_instanceOpenBehavior = InstanceOpenBehavior::OpenInExisting;
 bool g_exitFullscreenOnPlaybackEnd = true;
+bool g_hideWindowedCursor = true;
+bool g_taskbarFullControls = false;
+bool g_showStopButton = false;
+bool g_loopCurrentFile = false;
+// Empty means the normal Pictures\MPV WinterStatic Edition location.
+std::wstring g_screenshotDirectory;
 std::wstring g_preferredAudioLanguage;
 std::wstring g_preferredSubtitleLanguage;
 
@@ -427,7 +492,11 @@ double g_timePos = 0.0;
 double g_duration = 0.0;
 ULONGLONG g_lastControlsHover = 0;
 ULONGLONG g_lastFullscreenMouseActivity = 0;
+ULONGLONG g_lastWindowedVideoMouseActivity = 0;
 bool g_fullscreenCursorHidden = false;
+bool g_windowedCursorHidden = false;
+bool g_cursorOverVideo = false;
+bool g_trackingVideoMouseLeave = false;
 DWORD g_windowedStyle = 0;
 DWORD g_windowedExStyle = 0;
 RECT g_windowedRect{};
@@ -437,6 +506,9 @@ std::wstring g_audioInfoText = L"--";
 std::wstring g_subInfoText = L"--";
 std::wstring g_currentMediaPath;
 std::wstring g_pendingAutoNextPath;
+bool g_userStoppedPlayback = false;
+int64_t g_userStoppedPlaylistPos = -1;
+std::wstring g_skipResumeOnceForPath;
 std::map<std::wstring, double> g_resumePositions;
 bool g_resumePositionsDirty = false;
 std::vector<double> g_chapterTimes;
@@ -834,9 +906,10 @@ ShortcutTable DefaultShortcutBindings() {
 
     set(ShortcutAction::OpenFile, 0, MakeKeyBinding('O', true));
     set(ShortcutAction::PlayPause, 0, MakeKeyBinding(VK_SPACE));
-    set(ShortcutAction::PreviousChapter, 0, MakeKeyBinding(VK_LEFT, true));
+    set(ShortcutAction::PlayPause, 1, MakeKeyBinding(VK_MEDIA_PLAY_PAUSE));
+    set(ShortcutAction::PreviousChapter, 0, MakeKeyBinding(VK_LEFT, false, false, true));
     set(ShortcutAction::PreviousChapter, 1, MakeKeyBinding(VK_MEDIA_PREV_TRACK));
-    set(ShortcutAction::NextChapter, 0, MakeKeyBinding(VK_RIGHT, true));
+    set(ShortcutAction::NextChapter, 0, MakeKeyBinding(VK_RIGHT, false, false, true));
     set(ShortcutAction::NextChapter, 1, MakeKeyBinding(VK_MEDIA_NEXT_TRACK));
     set(ShortcutAction::SeekBackward, 0, MakeKeyBinding(VK_LEFT));
     set(ShortcutAction::SeekForward, 0, MakeKeyBinding(VK_RIGHT));
@@ -854,6 +927,9 @@ ShortcutTable DefaultShortcutBindings() {
     set(ShortcutAction::CycleAudio, 0, MakeKeyBinding('A'));
     set(ShortcutAction::CycleSubtitle, 0, MakeKeyBinding('S'));
     set(ShortcutAction::MediaInfo, 0, MakeKeyBinding('I'));
+    set(ShortcutAction::TakeScreenshot, 0, MakeKeyBinding(VK_OEM_2));
+    set(ShortcutAction::PreviousFrame, 0, MakeKeyBinding(VK_OEM_COMMA));
+    set(ShortcutAction::NextFrame, 0, MakeKeyBinding(VK_OEM_PERIOD));
 
     return bindings;
 }
@@ -925,6 +1001,64 @@ void LoadShortcutSettings() {
         g_shortcuts[next][0] = MakeKeyBinding(VK_RIGHT, true);
         g_shortcuts[next][1] = MakeKeyBinding(VK_MEDIA_NEXT_TRACK);
     }
+
+    // 0.4.7 moves the untouched Ctrl+Arrow chapter defaults to Shift+Arrow.
+    // Media Previous/Next remain the alternate chapter bindings. Custom chapter
+    // shortcuts are preserved.
+    if (SameKeyBinding(g_shortcuts[prev][0], MakeKeyBinding(VK_LEFT, true)) &&
+        SameKeyBinding(g_shortcuts[prev][1], MakeKeyBinding(VK_MEDIA_PREV_TRACK))) {
+        g_shortcuts[prev][0] = MakeKeyBinding(VK_LEFT, false, false, true);
+    }
+    if (SameKeyBinding(g_shortcuts[next][0], MakeKeyBinding(VK_RIGHT, true)) &&
+        SameKeyBinding(g_shortcuts[next][1], MakeKeyBinding(VK_MEDIA_NEXT_TRACK))) {
+        g_shortcuts[next][0] = MakeKeyBinding(VK_RIGHT, false, false, true);
+    }
+
+    // Previous/Next Frame are new in 0.4.7. Their comma/period defaults should
+    // never steal a binding a user had already assigned in an older settings.ini.
+    const size_t previousFrame = static_cast<size_t>(ShortcutAction::PreviousFrame);
+    const size_t nextFrame = static_cast<size_t>(ShortcutAction::NextFrame);
+    auto bindingUsedOutside = [&](const KeyBinding& binding, size_t excludedAction) {
+        for (size_t action = 0; action < kShortcutActionCount; ++action) {
+            if (action == excludedAction) continue;
+            for (size_t slot = 0; slot < kShortcutSlotCount; ++slot) {
+                if (g_shortcuts[action][slot].vk != 0 &&
+                    SameKeyBinding(g_shortcuts[action][slot], binding)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    if (bindingUsedOutside(g_shortcuts[previousFrame][0], previousFrame)) {
+        g_shortcuts[previousFrame][0] = {};
+    }
+    if (bindingUsedOutside(g_shortcuts[nextFrame][0], nextFrame)) {
+        g_shortcuts[nextFrame][0] = {};
+    }
+
+    // 0.4.6 keeps Media Play/Pause as the alternate default. Migrate only
+    // the exact untouched Space + empty-alternate pair so custom bindings stay intact.
+    const size_t playPause = static_cast<size_t>(ShortcutAction::PlayPause);
+    const size_t volumeUp = static_cast<size_t>(ShortcutAction::VolumeUp);
+    const size_t volumeDown = static_cast<size_t>(ShortcutAction::VolumeDown);
+    if (SameKeyBinding(g_shortcuts[playPause][0], MakeKeyBinding(VK_SPACE)) &&
+        g_shortcuts[playPause][1].vk == 0) {
+        g_shortcuts[playPause][1] = MakeKeyBinding(VK_MEDIA_PLAY_PAUSE);
+    }
+
+    // Some pre-release 0.4.6 settings may contain the temporary Windows volume-key
+    // alternates. Those keys also change system volume on the tested keyboard, so
+    // remove only that exact temporary default pair. Users can still assign the
+    // media-volume keys manually in the shortcut editor if they want them.
+    if (SameKeyBinding(g_shortcuts[volumeUp][0], MakeKeyBinding(VK_UP)) &&
+        SameKeyBinding(g_shortcuts[volumeUp][1], MakeKeyBinding(VK_VOLUME_UP))) {
+        g_shortcuts[volumeUp][1] = {};
+    }
+    if (SameKeyBinding(g_shortcuts[volumeDown][0], MakeKeyBinding(VK_DOWN)) &&
+        SameKeyBinding(g_shortcuts[volumeDown][1], MakeKeyBinding(VK_VOLUME_DOWN))) {
+        g_shortcuts[volumeDown][1] = {};
+    }
 }
 
 void SaveShortcutSettings() {
@@ -976,6 +1110,9 @@ std::wstring ShortcutKeyName(UINT vk) {
     case VK_VOLUME_MUTE: return L"Volume Mute";
     case VK_VOLUME_DOWN: return L"Volume Down";
     case VK_VOLUME_UP: return L"Volume Up";
+    case VK_OEM_COMMA: return L",";
+    case VK_OEM_PERIOD: return L".";
+    case VK_OEM_2: return L"/";
     }
 
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
@@ -1100,6 +1237,18 @@ void LoadSettings() {
         ReadSettingInt(L"General", L"AutoPlayNextFile", 0) != 0;
     g_exitFullscreenOnPlaybackEnd =
         ReadSettingInt(L"General", L"ExitFullscreenAtEnd", 1) != 0;
+    g_hideWindowedCursor =
+        ReadSettingInt(L"General", L"HideWindowedCursor", 1) != 0;
+    g_taskbarFullControls =
+        ReadSettingInt(L"General", L"TaskbarFullControls", 0) != 0;
+    g_showStopButton =
+        ReadSettingInt(L"General", L"ShowStopButton", 0) != 0;
+    g_screenshotDirectory =
+        ReadSettingString(L"Screenshots", L"SaveFolder", L"");
+    const int instanceBehavior =
+        std::clamp(ReadSettingInt(L"General", L"InstanceOpenBehavior", 0), 0, 2);
+    g_instanceOpenBehavior =
+        static_cast<InstanceOpenBehavior>(instanceBehavior);
     g_osdFontSize =
         std::clamp(ReadSettingInt(L"General", L"OsdFontSize", 72), 24, 180);
     g_subtitleFontSize =
@@ -1171,6 +1320,15 @@ void SaveSettings() {
                     g_autoPlayNextFile ? 1 : 0);
     WriteSettingInt(L"General", L"ExitFullscreenAtEnd",
                     g_exitFullscreenOnPlaybackEnd ? 1 : 0);
+    WriteSettingInt(L"General", L"HideWindowedCursor",
+                    g_hideWindowedCursor ? 1 : 0);
+    WriteSettingInt(L"General", L"TaskbarFullControls",
+                    g_taskbarFullControls ? 1 : 0);
+    WriteSettingInt(L"General", L"ShowStopButton",
+                    g_showStopButton ? 1 : 0);
+    WriteSettingString(L"Screenshots", L"SaveFolder", g_screenshotDirectory);
+    WriteSettingInt(L"General", L"InstanceOpenBehavior",
+                    static_cast<int>(g_instanceOpenBehavior));
     WriteSettingInt(L"General", L"OsdFontSize", g_osdFontSize);
     WriteSettingInt(L"Subtitles", L"FontSize", g_subtitleFontSize);
     WriteSettingInt(L"General", L"OsdPosition",
@@ -1996,6 +2154,299 @@ void LoadStateIcons() {
         g_instance, MAKEINTRESOURCEW(102), IMAGE_ICON, smallW, smallH, LR_SHARED));
 }
 
+// Taskbar glyphs reuse the same simple geometry language as the native
+// toolbar controls. Their implementations live later with the other GDI helpers.
+void DrawLine(HDC dc, int x1, int y1, int x2, int y2, COLORREF color, int width);
+void DrawTriangle(HDC dc, POINT a, POINT b, POINT c, COLORREF color);
+
+enum class TaskbarGlyph {
+    Previous,
+    Stop,
+    Play,
+    Pause,
+    Next,
+    Fullscreen
+};
+
+HICON CreateTaskbarGlyphIcon(TaskbarGlyph glyph) {
+    const int width = std::max(16, GetSystemMetrics(SM_CXSMICON));
+    const int height = std::max(16, GetSystemMetrics(SM_CYSMICON));
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height; // top-down DIB
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* rawBits = nullptr;
+    HBITMAP colorBitmap = CreateDIBSection(
+        nullptr, &bmi, DIB_RGB_COLORS, &rawBits, nullptr, 0);
+    if (!colorBitmap || !rawBits) {
+        if (colorBitmap) DeleteObject(colorBitmap);
+        return nullptr;
+    }
+
+    std::memset(rawBits, 0,
+                static_cast<size_t>(width) * static_cast<size_t>(height) * 4u);
+
+    HDC dc = CreateCompatibleDC(nullptr);
+    if (!dc) {
+        DeleteObject(colorBitmap);
+        return nullptr;
+    }
+    HBITMAP oldBitmap = static_cast<HBITMAP>(SelectObject(dc, colorBitmap));
+
+    const int cx = width / 2;
+    const int cy = height / 2;
+    const int scale = std::max(1, std::min(width, height) / 16);
+    const int halfH = std::max(5, 6 * scale);
+    const int lineWidth = std::max(1, 2 * scale);
+    const COLORREF fg = C_TEXT;
+
+    switch (glyph) {
+    case TaskbarGlyph::Play:
+        DrawTriangle(dc,
+                     { cx - 4 * scale, cy - halfH },
+                     { cx - 4 * scale, cy + halfH },
+                     { cx + 6 * scale, cy }, fg);
+        break;
+    case TaskbarGlyph::Pause: {
+        const int barW = std::max(2, 3 * scale);
+        RECT left{ cx - 5 * scale, cy - halfH,
+                   cx - 5 * scale + barW, cy + halfH + 1 };
+        RECT right{ cx + 2 * scale, cy - halfH,
+                    cx + 2 * scale + barW, cy + halfH + 1 };
+        FillSolid(dc, left, fg);
+        FillSolid(dc, right, fg);
+        break;
+    }
+    case TaskbarGlyph::Stop: {
+        const int half = std::max(4, 5 * scale);
+        RECT stop{ cx - half, cy - half, cx + half + 1, cy + half + 1 };
+        FillSolid(dc, stop, fg);
+        break;
+    }
+    case TaskbarGlyph::Previous:
+        DrawTriangle(dc,
+                     { cx + 6 * scale, cy - halfH },
+                     { cx + 6 * scale, cy + halfH },
+                     { cx, cy }, fg);
+        DrawTriangle(dc,
+                     { cx, cy - halfH },
+                     { cx, cy + halfH },
+                     { cx - 6 * scale, cy }, fg);
+        break;
+    case TaskbarGlyph::Next:
+        DrawTriangle(dc,
+                     { cx - 6 * scale, cy - halfH },
+                     { cx - 6 * scale, cy + halfH },
+                     { cx, cy }, fg);
+        DrawTriangle(dc,
+                     { cx, cy - halfH },
+                     { cx, cy + halfH },
+                     { cx + 6 * scale, cy }, fg);
+        break;
+    case TaskbarGlyph::Fullscreen: {
+        const int inset = 2 * scale;
+        const int arm = std::max(4, 5 * scale);
+        const int left = inset;
+        const int top = inset;
+        const int right = width - 1 - inset;
+        const int bottom = height - 1 - inset;
+        DrawLine(dc, left, top, left + arm, top, fg, lineWidth);
+        DrawLine(dc, left, top, left, top + arm, fg, lineWidth);
+        DrawLine(dc, right - arm, top, right, top, fg, lineWidth);
+        DrawLine(dc, right, top, right, top + arm, fg, lineWidth);
+        DrawLine(dc, left, bottom - arm, left, bottom, fg, lineWidth);
+        DrawLine(dc, left, bottom, left + arm, bottom, fg, lineWidth);
+        DrawLine(dc, right, bottom - arm, right, bottom, fg, lineWidth);
+        DrawLine(dc, right - arm, bottom, right, bottom, fg, lineWidth);
+        break;
+    }
+    }
+
+    SelectObject(dc, oldBitmap);
+    GdiFlush();
+    DeleteDC(dc);
+
+    // GDI drawing fills RGB but not the alpha byte. Promote every drawn pixel
+    // to fully opaque while leaving the untouched background transparent.
+    auto* pixels = static_cast<DWORD*>(rawBits);
+    const size_t pixelCount =
+        static_cast<size_t>(width) * static_cast<size_t>(height);
+    for (size_t i = 0; i < pixelCount; ++i) {
+        if ((pixels[i] & 0x00FFFFFFu) != 0) {
+            pixels[i] |= 0xFF000000u;
+        }
+    }
+
+    const size_t maskStride =
+        static_cast<size_t>(((width + 15) / 16) * 2);
+    std::vector<BYTE> maskBits(maskStride * static_cast<size_t>(height), 0);
+    HBITMAP maskBitmap = CreateBitmap(
+        width, height, 1, 1, maskBits.data());
+    if (!maskBitmap) {
+        DeleteObject(colorBitmap);
+        return nullptr;
+    }
+
+    ICONINFO info{};
+    info.fIcon = TRUE;
+    info.hbmColor = colorBitmap;
+    info.hbmMask = maskBitmap;
+    HICON icon = CreateIconIndirect(&info);
+
+    DeleteObject(maskBitmap);
+    DeleteObject(colorBitmap);
+    return icon;
+}
+
+void EnsureTaskbarGlyphIcons() {
+    if (!g_taskbarPlayIcon) {
+        g_taskbarPlayIcon = CreateTaskbarGlyphIcon(TaskbarGlyph::Play);
+    }
+    if (!g_taskbarPauseIcon) {
+        g_taskbarPauseIcon = CreateTaskbarGlyphIcon(TaskbarGlyph::Pause);
+    }
+    if (!g_taskbarPreviousIcon) {
+        g_taskbarPreviousIcon = CreateTaskbarGlyphIcon(TaskbarGlyph::Previous);
+    }
+    if (!g_taskbarStopIcon) {
+        g_taskbarStopIcon = CreateTaskbarGlyphIcon(TaskbarGlyph::Stop);
+    }
+    if (!g_taskbarNextIcon) {
+        g_taskbarNextIcon = CreateTaskbarGlyphIcon(TaskbarGlyph::Next);
+    }
+    if (!g_taskbarFullscreenIcon) {
+        g_taskbarFullscreenIcon = CreateTaskbarGlyphIcon(TaskbarGlyph::Fullscreen);
+    }
+}
+
+void DestroyTaskbarGlyphIcons() {
+    HICON* icons[] = {
+        &g_taskbarPlayIcon, &g_taskbarPauseIcon, &g_taskbarPreviousIcon,
+        &g_taskbarStopIcon, &g_taskbarNextIcon, &g_taskbarFullscreenIcon
+    };
+    for (HICON* icon : icons) {
+        if (*icon) {
+            DestroyIcon(*icon);
+            *icon = nullptr;
+        }
+    }
+}
+
+void ReleaseTaskbarInterface() {
+    if (g_taskbarList) {
+        g_taskbarList->Release();
+        g_taskbarList = nullptr;
+    }
+    g_taskbarButtonAdded = false;
+    g_taskbarStateKnown = false;
+}
+
+void BuildTaskbarButtons(std::array<THUMBBUTTON, kTaskbarButtonCount>& buttons,
+                         bool idle, bool paused) {
+    EnsureTaskbarGlyphIcons();
+
+    const bool hideExtra = !g_taskbarFullControls;
+    const THUMBBUTTONFLAGS mediaFlags = idle ? THBF_DISABLED : THBF_ENABLED;
+    const THUMBBUTTONFLAGS playFlags =
+        (!idle || (g_userStoppedPlayback && !g_currentMediaPath.empty()))
+            ? THBF_ENABLED
+            : THBF_DISABLED;
+
+    auto setButton = [](THUMBBUTTON& button, UINT id, HICON icon,
+                        const wchar_t* tooltip, THUMBBUTTONFLAGS flags) {
+        button = THUMBBUTTON{};
+        button.dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
+        button.iId = id;
+        button.hIcon = icon;
+        wcscpy_s(button.szTip, ARRAYSIZE(button.szTip), tooltip);
+        button.dwFlags = flags;
+    };
+
+    setButton(buttons[0], kTaskbarPreviousButtonId, g_taskbarPreviousIcon,
+              L"Seek back 5 seconds",
+              hideExtra ? THBF_HIDDEN : mediaFlags);
+    setButton(buttons[1], kTaskbarStopButtonId, g_taskbarStopIcon,
+              L"Stop",
+              (hideExtra || !g_showStopButton) ? THBF_HIDDEN : mediaFlags);
+    setButton(buttons[2], kTaskbarPlayPauseButtonId,
+              (!idle && !paused) ? g_taskbarPauseIcon : g_taskbarPlayIcon,
+              (!idle && !paused) ? L"Pause" : L"Play",
+              playFlags);
+    setButton(buttons[3], kTaskbarNextButtonId, g_taskbarNextIcon,
+              L"Seek forward 5 seconds",
+              hideExtra ? THBF_HIDDEN : mediaFlags);
+    const THUMBBUTTONFLAGS fullscreenFlags = hideExtra
+        ? THBF_HIDDEN
+        : static_cast<THUMBBUTTONFLAGS>(mediaFlags | THBF_DISMISSONCLICK);
+    setButton(buttons[4], kTaskbarFullscreenButtonId, g_taskbarFullscreenIcon,
+              L"Fullscreen", fullscreenFlags);
+}
+
+void UpdateTaskbarButtons(bool idle, bool paused, bool force = false) {
+    if (!g_taskbarList || !g_taskbarButtonAdded || !g_main) return;
+    if (!force && g_taskbarStateKnown &&
+        g_taskbarLastIdle == idle &&
+        g_taskbarLastPaused == paused &&
+        g_taskbarLastFullControls == g_taskbarFullControls &&
+        g_taskbarLastShowStopButton == g_showStopButton) {
+        return;
+    }
+
+    std::array<THUMBBUTTON, kTaskbarButtonCount> buttons{};
+    BuildTaskbarButtons(buttons, idle, paused);
+
+    if (SUCCEEDED(g_taskbarList->ThumbBarUpdateButtons(
+            g_main, static_cast<UINT>(buttons.size()), buttons.data()))) {
+        g_taskbarLastIdle = idle;
+        g_taskbarLastPaused = paused;
+        g_taskbarLastFullControls = g_taskbarFullControls;
+        g_taskbarLastShowStopButton = g_showStopButton;
+        g_taskbarStateKnown = true;
+    }
+}
+
+void InitializeTaskbarButton() {
+    if (!g_main) return;
+
+    ReleaseTaskbarInterface();
+
+    ITaskbarList3* taskbar = nullptr;
+    const HRESULT created = CoCreateInstance(
+        CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&taskbar));
+    if (FAILED(created) || !taskbar) return;
+
+    if (FAILED(taskbar->HrInit())) {
+        taskbar->Release();
+        return;
+    }
+
+    g_taskbarList = taskbar;
+    const bool idle = !g_mpvReady || MpvGetFlag("idle-active", true);
+    const bool paused = !idle && MpvGetFlag("pause", true);
+
+    std::array<THUMBBUTTON, kTaskbarButtonCount> buttons{};
+    BuildTaskbarButtons(buttons, idle, paused);
+
+    // Register all five slots once. In the default compact layout the four
+    // optional controls are THBF_HIDDEN. This lets Options reveal/hide them
+    // later with ThumbBarUpdateButtons without re-registering the thumbbar.
+    if (SUCCEEDED(g_taskbarList->ThumbBarAddButtons(
+            g_main, static_cast<UINT>(buttons.size()), buttons.data()))) {
+        g_taskbarButtonAdded = true;
+        g_taskbarLastIdle = idle;
+        g_taskbarLastPaused = paused;
+        g_taskbarLastFullControls = g_taskbarFullControls;
+        g_taskbarLastShowStopButton = g_showStopButton;
+        g_taskbarStateKnown = true;
+    }
+}
+
 void UpdateWindowStateIcon(bool paused) {
     if (!g_main) return;
     if (!g_playIconBig || !g_pauseIconBig) LoadStateIcons();
@@ -2057,7 +2508,17 @@ void PollMpv() {
 
         ApplyRememberedTrackSelections();
         RefreshChapterMarkers();
-        RestoreCurrentResumePosition();
+
+        const bool skipResumeForThisLoad =
+            !g_skipResumeOnceForPath.empty() &&
+            _wcsicmp(g_skipResumeOnceForPath.c_str(),
+                     g_currentMediaPath.c_str()) == 0;
+        g_skipResumeOnceForPath.clear();
+        g_userStoppedPlayback = false;
+        g_userStoppedPlaylistPos = -1;
+        if (!skipResumeForThisLoad) {
+            RestoreCurrentResumePosition();
+        }
         g_pollCounter = 3;
 
         const int64_t playlistCount = MpvGetInt64("playlist-count", 0);
@@ -2125,7 +2586,10 @@ void PollMpv() {
         !g_lastEofReached &&
         g_seenPlayingSinceLoad;
 
-    if (eofJustReached) {
+    // LOOP current-file takes priority over playlist/AUTO advancement and the
+    // final-EOF fullscreen-exit policy. libmpv owns the actual repeat; this
+    // guard simply prevents frontend EOF side effects if eof-reached pulses.
+    if (eofJustReached && !g_loopCurrentFile) {
         const int64_t playlistCount = MpvGetInt64("playlist-count", 0);
         const int64_t playlistPos = MpvGetInt64("playlist-pos", -1);
         const bool playlistHasNext =
@@ -2181,6 +2645,7 @@ void PollMpv() {
 
     const bool pausedForIcon = !idle && paused;
     UpdateWindowStateIcon(pausedForIcon);
+    UpdateTaskbarButtons(idle, paused);
 
     if (g_overlay) SetWindowPos(g_overlay, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
@@ -2320,6 +2785,7 @@ bool InitMpv() {
     g_mpvApi.set_option_string(g_mpv, "input-default-bindings", "no");
     g_mpvApi.set_option_string(g_mpv, "input-vo-keyboard", "no");
     g_mpvApi.set_option_string(g_mpv, "volume-max", "100");
+    g_mpvApi.set_option_string(g_mpv, "loop-file", "no");
     if (!g_preferredAudioLanguage.empty()) {
         const std::string alang = WideToUtf8(g_preferredAudioLanguage);
         g_mpvApi.set_option_string(g_mpv, "alang", alang.c_str());
@@ -2421,7 +2887,8 @@ std::wstring AbsoluteLocalPath(const std::wstring& path) {
     return ec ? path : absolute.lexically_normal().wstring();
 }
 
-std::wstring FindNextMediaFileInFolder(const std::wstring& currentPath) {
+std::wstring FindAdjacentMediaFileInFolder(const std::wstring& currentPath,
+                                             bool next) {
     if (currentPath.empty()) return L"";
 
     const std::filesystem::path current(currentPath);
@@ -2454,19 +2921,31 @@ std::wstring FindNextMediaFileInFolder(const std::wstring& currentPath) {
     const std::wstring currentName = current.filename().wstring();
     for (size_t i = 0; i < files.size(); ++i) {
         if (_wcsicmp(files[i].filename().wstring().c_str(),
-                     currentName.c_str()) == 0) {
-            if (i + 1 < files.size()) {
-                return files[i + 1].wstring();
-            }
-            break;
+                     currentName.c_str()) != 0) {
+            continue;
         }
+
+        if (next) {
+            return i + 1 < files.size() ? files[i + 1].wstring() : L"";
+        }
+        return i > 0 ? files[i - 1].wstring() : L"";
     }
 
     return L"";
 }
 
+std::wstring FindNextMediaFileInFolder(const std::wstring& currentPath) {
+    return FindAdjacentMediaFileInFolder(currentPath, true);
+}
+
 void LoadPlaylist(const std::vector<std::wstring>& paths) {
     if (!g_mpvReady || paths.empty()) return;
+
+    // An explicit load is unrelated to a previous user Stop. Resume handling
+    // should therefore use the normal per-file rules for the newly opened item.
+    g_userStoppedPlayback = false;
+    g_userStoppedPlaylistPos = -1;
+    g_skipResumeOnceForPath.clear();
 
     // Any explicit/replacement load supersedes a queued AUTO transition.
     g_pendingAutoNextPath.clear();
@@ -2511,6 +2990,11 @@ void LoadPlaylist(const std::vector<std::wstring>& paths) {
         return;
     }
 
+    // An explicit/replacement open should behave like opening a new video, not
+    // inherit the pause state of the file it replaced. This covers File -> Open,
+    // drag/drop, Explorer/existing-instance handoff, startup paths, and manual
+    // AUTO folder navigation. Natural mpv playlist advances are unaffected.
+    MpvSetFlag("pause", false);
     g_pollCounter = 3;
 }
 
@@ -2529,10 +3013,6 @@ void PlayPendingAutoNextFile() {
     if (MpvGetInt64("playlist-count", 0) > 1) return;
 
     LoadFile(next);
-
-    // keep-open=yes leaves mpv paused on EOF. That pause state survives a
-    // replace load unless we deliberately clear it for AUTO advance.
-    MpvSetFlag("pause", false);
 }
 
 void ToggleAutoPlayNextFile() {
@@ -2540,6 +3020,21 @@ void ToggleAutoPlayNextFile() {
     WriteSettingInt(L"General", L"AutoPlayNextFile",
                     g_autoPlayNextFile ? 1 : 0);
     if (g_autoNext) InvalidateRect(g_autoNext, nullptr, FALSE);
+}
+
+void ToggleLoopCurrentFile() {
+    if (!g_mpvReady) return;
+
+    g_loopCurrentFile = !g_loopCurrentFile;
+    MpvCommand({"set", "loop-file", g_loopCurrentFile ? "inf" : "no"});
+
+    if (g_loopCurrent) InvalidateRect(g_loopCurrent, nullptr, FALSE);
+    if (g_playMenu) {
+        CheckMenuItem(g_playMenu, IDM_LOOP_CURRENT_FILE,
+                      MF_BYCOMMAND |
+                      (g_loopCurrentFile ? MF_CHECKED : MF_UNCHECKED));
+    }
+    ShowOsdText(g_loopCurrentFile ? L"Loop: On" : L"Loop: Off", 1000);
 }
 
 void OpenFileDialog() {
@@ -2577,19 +3072,120 @@ void TogglePlay() {
     if (!g_mpvReady) return;
     const bool paused = MpvGetFlag("pause", false);
     const bool idle = MpvGetFlag("idle-active", true);
-    if (idle) return;
-    MpvSetFlag("pause", !paused);
+
+    if (idle) {
+        // Stop enters mpv idle mode. `stop keep-playlist` deliberately keeps the
+        // authoritative libmpv playlist, but after stopping there is not always
+        // an active "current" entry. Restart the exact numeric playlist item we
+        // cached before Stop instead of relying on `playlist-play-index current`.
+        if (!g_userStoppedPlayback || g_currentMediaPath.empty()) return;
+
+        int64_t restartPos = g_userStoppedPlaylistPos;
+        const auto entries = GetPlaylistEntries();
+        if (restartPos < 0 || restartPos >= static_cast<int64_t>(entries.size())) {
+            // Defensive fallback: locate the stopped file in the retained mpv
+            // playlist if this libmpv build did not report playlist-pos reliably.
+            restartPos = -1;
+            for (size_t i = 0; i < entries.size(); ++i) {
+                const std::wstring entryPath =
+                    AbsoluteLocalPath(Utf8ToWide(entries[i].filename));
+                if (!entryPath.empty() &&
+                    _wcsicmp(entryPath.c_str(), g_currentMediaPath.c_str()) == 0) {
+                    restartPos = static_cast<int64_t>(i);
+                    break;
+                }
+            }
+        }
+        if (restartPos < 0) return;
+
+        g_skipResumeOnceForPath = g_currentMediaPath;
+        if (!MpvCommand({"playlist-play-index", std::to_string(restartPos)})) {
+            g_skipResumeOnceForPath.clear();
+            return;
+        }
+        g_userStoppedPlaylistPos = -1;
+        MpvSetFlag("pause", false);
+        PollMpv();
+        ShowOsdText(L"\u25B6", 900);
+        return;
+    }
+
+    const bool newPaused = !paused;
+    if (!MpvSetFlag("pause", newPaused)) return;
     PollMpv();
+
+    // Brief old-player/VHS-style confirmation for explicit Play/Pause actions.
+    // This uses the normal transient OSD path (Top Left by default), so every
+    // input route through TogglePlay() gets the same feedback without changing
+    // playback behavior or creating a separate overlay.
+    ShowOsdText(newPaused ? L"\u275A\u275A" : L"\u25B6", 900);
+}
+
+void PausePlaybackIfPlaying() {
+    if (!g_mpvReady) return;
+    if (MpvGetFlag("idle-active", true)) return;
+    if (!MpvGetFlag("pause", false)) {
+        MpvSetFlag("pause", true);
+        PollMpv();
+    }
 }
 
 void StopPlayback() {
-    MpvCommand({"stop"});
+    if (!g_mpvReady || MpvGetFlag("idle-active", true)) return;
+
+    // Remember the exact libmpv playlist item before Stop. `keep-playlist`
+    // preserves the queue, but the active/current marker may disappear in idle
+    // mode; the cached numeric index gives Play a deterministic restart target.
+    int64_t stoppedPos = MpvGetInt64("playlist-pos", -1);
+    if (stoppedPos < 0) {
+        const auto entries = GetPlaylistEntries();
+        for (size_t i = 0; i < entries.size(); ++i) {
+            if (entries[i].playing || entries[i].current) {
+                stoppedPos = static_cast<int64_t>(i);
+                break;
+            }
+        }
+    }
+
+    if (MpvCommand({"stop", "keep-playlist"})) {
+        g_userStoppedPlayback = !g_currentMediaPath.empty();
+        g_userStoppedPlaylistPos = stoppedPos;
+    }
     PollMpv();
 }
 
 void SeekAbsolute(double seconds);
 
 void SeekBy(int seconds) {
+    if (!g_mpvReady || g_duration <= 0.0) return;
+
+    // A relative keyframe seek that runs past EOF can stop on mpv's last
+    // playable frame without producing the eof-reached transition that AUTO
+    // intentionally uses. Keep normal seeks fast, but use the proven exact EOF
+    // path for the final forward hop so manual seek-to-end still advances AUTO.
+    if (seconds > 0) {
+        const double currentPos = std::max(
+            0.0, MpvGetDouble("time-pos", g_timePos));
+        if (currentPos + static_cast<double>(seconds) >= g_duration - 0.05) {
+            SeekAbsolute(g_duration);
+            return;
+        }
+    }
+
+    // Match mpv's normal Left/Right seek behavior: relative seeks restart at
+    // keyframe boundaries, which is deliberately fast when repeated rapidly.
+    // osd-msg asks mpv to show its normal seek-time feedback while the client
+    // API would otherwise default to no OSD.
+    if (MpvCommand({"osd-msg", "seek", std::to_string(seconds),
+                    "relative+keyframes"}) && seconds > 0) {
+        // Preserve the existing rule that deliberately seeking to the end may
+        // advance AUTO but must not by itself kick the player out of fullscreen.
+        // PollMpv clears this again as soon as playback is materially before EOF.
+        g_suppressNextEofFullscreenExit = true;
+    }
+}
+
+void PreciseSeekBy(int seconds) {
     if (!g_mpvReady || g_duration <= 0.0) return;
     SeekAbsolute(g_timePos + static_cast<double>(seconds));
 }
@@ -2609,6 +3205,125 @@ void SeekAbsolute(double seconds) {
     UpdateTimeLabel();
     if (g_seek) InvalidateRect(g_seek, nullptr, FALSE);
     ShowOsdText(FormatTime(g_timePos) + L" / " + FormatTime(g_duration));
+}
+
+std::filesystem::path DefaultScreenshotDirectory() {
+    PWSTR knownPath = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Pictures, KF_FLAG_DEFAULT,
+                                       nullptr, &knownPath)) && knownPath) {
+        std::filesystem::path path(knownPath);
+        CoTaskMemFree(knownPath);
+        return path / L"MPV WinterStatic Edition";
+    }
+    if (knownPath) CoTaskMemFree(knownPath);
+
+    wchar_t profile[MAX_PATH * 4]{};
+    const DWORD n = GetEnvironmentVariableW(
+        L"USERPROFILE", profile, static_cast<DWORD>(std::size(profile)));
+    if (n > 0 && n < std::size(profile)) {
+        return std::filesystem::path(profile) / L"Pictures" /
+               L"MPV WinterStatic Edition";
+    }
+
+    return std::filesystem::path(GetExeDirectory()) / L"Screenshots";
+}
+
+std::filesystem::path ScreenshotDirectory() {
+    if (!g_screenshotDirectory.empty()) {
+        return std::filesystem::path(g_screenshotDirectory);
+    }
+    return DefaultScreenshotDirectory();
+}
+
+bool BrowseForScreenshotFolder(HWND owner, std::wstring& selectedPath) {
+    IFileOpenDialog* dialog = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr,
+                                  CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
+    if (FAILED(hr) || !dialog) return false;
+
+    DWORD options = 0;
+    if (SUCCEEDED(dialog->GetOptions(&options))) {
+        dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+    }
+    dialog->SetTitle(L"Choose screenshot folder");
+
+    const std::filesystem::path initial = selectedPath.empty()
+        ? ScreenshotDirectory()
+        : std::filesystem::path(selectedPath);
+    IShellItem* initialItem = nullptr;
+    if (SUCCEEDED(SHCreateItemFromParsingName(initial.c_str(), nullptr,
+                                               IID_PPV_ARGS(&initialItem))) &&
+        initialItem) {
+        dialog->SetFolder(initialItem);
+        initialItem->Release();
+    }
+
+    hr = dialog->Show(owner);
+    if (SUCCEEDED(hr)) {
+        IShellItem* result = nullptr;
+        if (SUCCEEDED(dialog->GetResult(&result)) && result) {
+            PWSTR path = nullptr;
+            if (SUCCEEDED(result->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                selectedPath = path;
+                CoTaskMemFree(path);
+            }
+            result->Release();
+        }
+    }
+
+    dialog->Release();
+    return !selectedPath.empty() && SUCCEEDED(hr);
+}
+
+std::filesystem::path NextScreenshotPath(const std::filesystem::path& directory) {
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+
+    wchar_t stem[96]{};
+    swprintf_s(stem, L"WinterStatic-%04u-%02u-%02u_%02u-%02u-%02u-%03u",
+               st.wYear, st.wMonth, st.wDay,
+               st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+
+    std::filesystem::path candidate = directory / (std::wstring(stem) + L".png");
+    std::error_code ec;
+    if (!std::filesystem::exists(candidate, ec)) return candidate;
+
+    for (unsigned int suffix = 2; suffix < 10000; ++suffix) {
+        candidate = directory /
+            (std::wstring(stem) + L"-" + std::to_wstring(suffix) + L".png");
+        ec.clear();
+        if (!std::filesystem::exists(candidate, ec)) return candidate;
+    }
+
+    return directory / (std::wstring(stem) + L"-extra.png");
+}
+
+void TakeScreenshot() {
+    if (!g_mpvReady) return;
+
+    const std::filesystem::path directory = ScreenshotDirectory();
+    std::error_code ec;
+    std::filesystem::create_directories(directory, ec);
+    if (ec) {
+        ShowOsdText(L"Screenshot failed: could not create save folder", 1800);
+        return;
+    }
+
+    const std::filesystem::path path = NextScreenshotPath(directory);
+    if (!MpvCommand({"screenshot-to-file", WideToUtf8(path.wstring()),
+                     "subtitles"})) {
+        ShowOsdText(L"Screenshot failed", 1500);
+        return;
+    }
+
+    ShowOsdText(L"Screenshot saved: " + path.filename().wstring(), 1800);
+}
+
+void FrameStep(bool next) {
+    if (!g_mpvReady || MpvGetFlag("idle-active", true)) return;
+    MpvCommand({next ? "frame-step" : "frame-back-step"});
+    g_pollCounter = 3;
+    PollMpv();
 }
 
 void ChapterStep(bool next) {
@@ -2875,6 +3590,21 @@ void PlaylistStep(bool next) {
 
     const int64_t count = MpvGetInt64("playlist-count", 0);
     const int64_t pos = MpvGetInt64("playlist-pos", -1);
+
+    // Explicit multi-item playlists keep priority. With one loaded file and
+    // AUTO enabled, the same shortcuts navigate the surrounding folder using
+    // AUTO's Explorer-style filename ordering.
+    if (count <= 1 && g_autoPlayNextFile && !g_currentMediaPath.empty()) {
+        const std::wstring adjacent =
+            FindAdjacentMediaFileInFolder(g_currentMediaPath, next);
+        if (adjacent.empty()) {
+            ShowOsdText(next ? L"No next file" : L"No previous file", 1000);
+            return;
+        }
+        LoadFile(adjacent);
+        return;
+    }
+
     if (count <= 0 || pos < 0) {
         if (!g_playlistOsdVisible) FlashPlaylistOsd();
         return;
@@ -3177,7 +3907,8 @@ void LayoutChildren(HWND hwnd) {
         x += 30;
     };
     placeSquare(g_play);
-    placeSquare(g_stop);
+    ShowWindow(g_stop, g_showStopButton ? SW_SHOW : SW_HIDE);
+    if (g_showStopButton) placeSquare(g_stop);
     placeSquare(g_prev);
     placeSquare(g_seekBack);
     placeSquare(g_seekForward);
@@ -3189,6 +3920,10 @@ void LayoutChildren(HWND hwnd) {
     // normal transport text colour when enabled.
     MoveWindow(g_autoNext, x, y, 42, h, TRUE);
     x += 46;
+
+    // LOOP is a compact current-file repeat toggle. It is session-only (never
+    // written to settings.ini) and starts Off on every launch.
+    placeSquare(g_loopCurrent);
 
     // Compact split playlist control: text button shows the native mpv OSD;
     // the adjacent triangle opens the clickable playlist menu.
@@ -3222,7 +3957,7 @@ void LayoutChildren(HWND hwnd) {
     // widths never stay stuck until the next fullscreen/resize cycle.
     const int middleLeft = x + 3;
     const int middleRight = right - 10;
-    const int middleAvailable = std::max(20, middleRight - middleLeft);
+    const int middleAvailable = std::max(0, middleRight - middleLeft);
 
     auto textWidth = [&](HWND label, const std::wstring& text, int fallback) {
         int width = fallback;
@@ -3247,29 +3982,82 @@ void LayoutChildren(HWND hwnd) {
     constexpr int trackButtonW = 38;
     constexpr int gap = 4;
     const int fixedW = trackButtonW * 2 + gap * 4;
-    int textBudget = std::max(30, middleAvailable - fixedW);
-    const int desiredText = statusW + audioInfoW + subInfoW;
 
-    if (desiredText > textBudget) {
-        // Preserve readable track labels first, then let the playback field ellipsize.
-        audioInfoW = std::min(audioInfoW, std::max(42, textBudget / 4));
-        subInfoW = std::min(subInfoW, std::max(42, textBudget / 4));
-        statusW = std::max(30, textBudget - audioInfoW - subInfoW);
+    // At narrow widths the optional Stop button consumes another 30 px on the
+    // left. Never let the middle information group run underneath the mute /
+    // volume / time controls. If even the two track buttons cannot fit, keep
+    // only the playback-status field; the same track actions remain available
+    // from the menus and keyboard shortcuts.
+    if (middleAvailable < fixedW) {
+        ShowWindow(g_subs, SW_HIDE);
+        ShowWindow(g_subInfo, SW_HIDE);
+        ShowWindow(g_audio, SW_HIDE);
+        ShowWindow(g_audioInfo, SW_HIDE);
+        MoveWindow(g_status, middleLeft, y + 4, middleAvailable, 18, TRUE);
+    } else {
+        ShowWindow(g_subs, SW_SHOW);
+        ShowWindow(g_subInfo, SW_SHOW);
+        ShowWindow(g_audio, SW_SHOW);
+        ShowWindow(g_audioInfo, SW_SHOW);
+
+        const int textBudget = std::max(0, middleAvailable - fixedW);
+        const int desiredText = statusW + audioInfoW + subInfoW;
+
+        if (desiredText > textBudget) {
+            // Preserve the two track buttons, then divide the remaining text
+            // budget without hard minimums that can cause overlap. Track labels
+            // may collapse to a few characters before the status field does.
+            const int perTrackCap = textBudget / 4;
+            audioInfoW = std::min(audioInfoW, perTrackCap);
+            subInfoW = std::min(subInfoW, perTrackCap);
+            statusW = std::max(0, textBudget - audioInfoW - subInfoW);
+        }
+
+        int middleX = middleLeft;
+        MoveWindow(g_status, middleX, y + 4, statusW, 18, TRUE);
+        middleX += statusW + gap;
+
+        MoveWindow(g_subs, middleX, y, trackButtonW, h, TRUE);
+        middleX += trackButtonW + gap;
+        MoveWindow(g_subInfo, middleX, y + 4, subInfoW, 18, TRUE);
+        middleX += subInfoW + gap;
+
+        MoveWindow(g_audio, middleX, y, trackButtonW, h, TRUE);
+        middleX += trackButtonW + gap;
+        MoveWindow(g_audioInfo, middleX, y + 4, audioInfoW, 18, TRUE);
     }
 
-    int middleX = middleLeft;
-    MoveWindow(g_status, middleX, y + 4, statusW, 18, TRUE);
-    middleX += statusW + gap;
+}
 
-    MoveWindow(g_subs, middleX, y, trackButtonW, h, TRUE);
-    middleX += trackButtonW + gap;
-    MoveWindow(g_subInfo, middleX, y + 4, subInfoW, 18, TRUE);
-    middleX += subInfoW + gap;
+void SetWindowedCursorHidden(bool hidden) {
+    if (g_windowedCursorHidden == hidden) return;
+    g_windowedCursorHidden = hidden;
+    SetCursor(hidden ? nullptr : LoadCursorW(nullptr, IDC_ARROW));
+}
 
-    MoveWindow(g_audio, middleX, y, trackButtonW, h, TRUE);
-    middleX += trackButtonW + gap;
-    MoveWindow(g_audioInfo, middleX, y + 4, audioInfoW, 18, TRUE);
+void NoteWindowedVideoMouseActivity() {
+    if (g_fullscreen) return;
+    g_cursorOverVideo = true;
+    g_lastWindowedVideoMouseActivity = GetTickCount64();
+    SetWindowedCursorHidden(false);
+}
 
+void CheckWindowedCursorHide() {
+    if (g_fullscreen || !g_hideWindowedCursor || !g_cursorOverVideo) {
+        SetWindowedCursorHidden(false);
+        return;
+    }
+    if (!g_mpvReady || !g_playing ||
+        GetForegroundWindow() != g_main ||
+        GetCapture() != nullptr) {
+        SetWindowedCursorHidden(false);
+        return;
+    }
+
+    const ULONGLONG now = GetTickCount64();
+    if (now - g_lastWindowedVideoMouseActivity >= kFullscreenCursorHideMs) {
+        SetWindowedCursorHidden(true);
+    }
 }
 
 void SetFullscreenCursorHidden(bool hidden) {
@@ -3286,6 +4074,9 @@ void NoteFullscreenMouseActivity() {
 
 void EnterFullscreen() {
     if (g_fullscreen) return;
+    g_cursorOverVideo = false;
+    g_trackingVideoMouseLeave = false;
+    SetWindowedCursorHidden(false);
     g_windowedStyle = static_cast<DWORD>(GetWindowLongPtrW(g_main, GWL_STYLE));
     g_windowedExStyle = static_cast<DWORD>(GetWindowLongPtrW(g_main, GWL_EXSTYLE));
     GetWindowRect(g_main, &g_windowedRect);
@@ -3334,11 +4125,52 @@ void ExitFullscreen() {
     }
     g_controlsVisible = true;
     ShowWindow(g_panel, SW_SHOW);
+    g_lastWindowedVideoMouseActivity = GetTickCount64();
+    SetWindowedCursorHidden(false);
     LayoutChildren(g_main);
 }
 
 void ToggleFullscreen() {
     if (g_fullscreen) ExitFullscreen(); else EnterFullscreen();
+}
+
+void ActivateMainWindowFromTaskbar() {
+    if (!g_main) return;
+
+    if (IsIconic(g_main)) ShowWindow(g_main, SW_RESTORE);
+    else if (!IsWindowVisible(g_main)) ShowWindow(g_main, SW_SHOW);
+
+    // THBF_DISMISSONCLICK closes the Shell thumbnail only after the click
+    // notification has returned.  Activation therefore happens on a short
+    // one-shot timer so the taskbar flyout cannot immediately take focus back.
+    BringWindowToTop(g_main);
+    SetWindowPos(g_main, HWND_TOP, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    SetForegroundWindow(g_main);
+    SetActiveWindow(g_main);
+}
+
+void ToggleFullscreenFromTaskbar() {
+    if (!g_main) return;
+
+    // A thumbbar click can arrive while the real top-level window is minimized.
+    // Restore it before EnterFullscreen() snapshots the windowed placement;
+    // otherwise the saved placement can remain a minimized shell-preview state
+    // and restoring from fullscreen may leave the video child in a bad layout.
+    if (!g_fullscreen) {
+        if (IsIconic(g_main)) ShowWindow(g_main, SW_RESTORE);
+        else if (!IsWindowVisible(g_main)) ShowWindow(g_main, SW_SHOW);
+        UpdateWindow(g_main);
+    }
+
+    ToggleFullscreen();
+
+    // The Shell dismisses its thumbnail flyout after THBN_CLICKED returns.
+    // Re-assert foreground activation just after that dismissal so clicking
+    // Fullscreen behaves like a direct player command: the player itself comes
+    // forward immediately instead of remaining behind the taskbar preview.
+    KillTimer(g_main, TIMER_TASKBAR_ACTIVATE);
+    SetTimer(g_main, TIMER_TASKBAR_ACTIVATE, 75, nullptr);
 }
 
 void CheckFullscreenControlsHover() {
@@ -3526,7 +4358,10 @@ void BuildMenus() {
 
     const std::wstring openLabel =
         ShortcutMenuLabel(L"&Open...", ShortcutAction::OpenFile);
+    const std::wstring screenshotLabel =
+        ShortcutMenuLabel(L"Take &screenshot", ShortcutAction::TakeScreenshot);
     AppendMenuW(g_fileMenu, MF_STRING, IDM_FILE_OPEN, openLabel.c_str());
+    AppendMenuW(g_fileMenu, MF_STRING, IDM_FILE_SCREENSHOT, screenshotLabel.c_str());
     AppendMenuW(g_fileMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(g_fileMenu, MF_STRING, IDM_FILE_EXIT, L"E&xit");
 
@@ -3564,9 +4399,12 @@ void BuildMenus() {
         ShortcutMenuLabel(L"Increase speed", ShortcutAction::SpeedUp);
     const std::wstring muteLabel =
         ShortcutMenuLabel(L"Mute", ShortcutAction::Mute);
+    const std::wstring loopLabel =
+        ShortcutMenuLabel(L"Loop current file", ShortcutAction::ToggleLoopCurrent);
 
     AppendMenuW(g_playMenu, MF_STRING, IDM_PLAY_TOGGLE, playLabel.c_str());
     AppendMenuW(g_playMenu, MF_STRING, IDM_PLAY_STOP, stopLabel.c_str());
+    AppendMenuW(g_playMenu, MF_STRING, IDM_LOOP_CURRENT_FILE, loopLabel.c_str());
     AppendMenuW(g_playMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(g_playMenu, MF_STRING, IDM_PLAY_PREV, prevChapterLabel.c_str());
     AppendMenuW(g_playMenu, MF_STRING, IDM_PLAY_BACK, seekBackLabel.c_str());
@@ -3585,10 +4423,15 @@ void BuildMenus() {
 
 void RefreshMenuShortcutLabels() {
     if (g_fileMenu) {
-        const std::wstring label =
+        const std::wstring openLabel =
             ShortcutMenuLabel(L"&Open...", ShortcutAction::OpenFile);
+        const std::wstring screenshotLabel =
+            ShortcutMenuLabel(L"Take &screenshot", ShortcutAction::TakeScreenshot);
         ModifyMenuW(g_fileMenu, IDM_FILE_OPEN,
-                    MF_BYCOMMAND | MF_STRING, IDM_FILE_OPEN, label.c_str());
+                    MF_BYCOMMAND | MF_STRING, IDM_FILE_OPEN, openLabel.c_str());
+        ModifyMenuW(g_fileMenu, IDM_FILE_SCREENSHOT,
+                    MF_BYCOMMAND | MF_STRING, IDM_FILE_SCREENSHOT,
+                    screenshotLabel.c_str());
     }
 
     if (g_viewMenu) {
@@ -3620,13 +4463,17 @@ void RefreshMenuShortcutLabels() {
             { IDM_PLAY_NEXT, L"Next chapter", ShortcutAction::NextChapter },
             { IDM_SPEED_DOWN, L"Decrease speed", ShortcutAction::SpeedDown },
             { IDM_SPEED_UP, L"Increase speed", ShortcutAction::SpeedUp },
-            { IDM_MUTE, L"Mute", ShortcutAction::Mute }
+            { IDM_MUTE, L"Mute", ShortcutAction::Mute },
+            { IDM_LOOP_CURRENT_FILE, L"Loop current file", ShortcutAction::ToggleLoopCurrent }
         };
 
         for (const auto& item : items) {
             const std::wstring label = ShortcutMenuLabel(item.label, item.action);
-            ModifyMenuW(g_playMenu, item.id,
-                        MF_BYCOMMAND | MF_STRING, item.id, label.c_str());
+            UINT flags = MF_BYCOMMAND | MF_STRING;
+            if (item.id == IDM_LOOP_CURRENT_FILE && g_loopCurrentFile) {
+                flags |= MF_CHECKED;
+            }
+            ModifyMenuW(g_playMenu, item.id, flags, item.id, label.c_str());
         }
     }
 }
@@ -3697,6 +4544,10 @@ void ShowContextMenu(POINT screenPoint) {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_PLAY_TOGGLE, L"Play / Pause");
     AppendMenuW(menu, MF_STRING, IDM_PLAY_STOP, L"Stop");
+    AppendMenuW(menu,
+                MF_STRING | (g_loopCurrentFile ? MF_CHECKED : 0),
+                IDM_LOOP_CURRENT_FILE,
+                L"Loop current file");
     AppendMenuW(menu,
                 MF_STRING | (g_autoPlayNextFile ? MF_CHECKED : 0),
                 IDM_AUTO_NEXT_FILE,
@@ -3839,6 +4690,43 @@ void DrawButtonGlyph(HDC dc, int id, const RECT& r) {
         RECT vert{ cx - 1, cy - 6, cx + 2, cy + 7 };
         FillSolid(dc, horiz, fg);
         FillSolid(dc, vert, fg);
+        return;
+    }
+    if (id == IDC_LOOP_CURRENT) {
+        const COLORREF loopColor = g_loopCurrentFile ? fg : C_AUTO_OFF_TEXT;
+
+        // Exact 26x26 silhouette supplied for the LOOP button artwork. The
+        // On/Off references have identical geometry and differ only in colour.
+        // Rendering the silhouette as a mask preserves the normal native
+        // button background/hover/pressed states.
+        static constexpr unsigned int kLoopGlyphRows[26] = {
+            0x0000000u, 0x0000000u, 0x0000000u, 0x0010000u, 0x0070000u,
+            0x00F0000u, 0x03FFF80u, 0x07FFFC0u, 0x03FFFE0u, 0x00F00E0u,
+            0x00700E0u, 0x00100E0u, 0x00000E0u, 0x0000000u, 0x0380000u,
+            0x0380400u, 0x0380700u, 0x0380780u, 0x03FFFE0u, 0x01FFFF0u,
+            0x00FFFE0u, 0x0000780u, 0x0000700u, 0x0000400u, 0x0000000u,
+            0x0000000u
+        };
+
+        constexpr int glyphSize = 26;
+        const int x0 = r.left + ((r.right - r.left) - glyphSize) / 2;
+        const int y0 = r.top + ((r.bottom - r.top) - glyphSize) / 2;
+        HBRUSH glyphBrush = CreateSolidBrush(loopColor);
+        if (glyphBrush) {
+            for (int y = 0; y < glyphSize; ++y) {
+                const unsigned int row = kLoopGlyphRows[y];
+                int x = 0;
+                while (x < glyphSize) {
+                    while (x < glyphSize && (row & (1u << x)) == 0) ++x;
+                    if (x >= glyphSize) break;
+                    const int runStart = x;
+                    while (x < glyphSize && (row & (1u << x)) != 0) ++x;
+                    RECT run{ x0 + runStart, y0 + y, x0 + x, y0 + y + 1 };
+                    FillRect(dc, &run, glyphBrush);
+                }
+            }
+            DeleteObject(glyphBrush);
+        }
         return;
     }
     if (id == IDC_PLAYLIST_MENU) {
@@ -4285,10 +5173,24 @@ LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             RECT r{};
             GetClientRect(g_main, &r);
             if (!g_controlsVisible && p.y >= r.bottom - kRevealEdge) SetControlsVisible(true);
+        } else {
+            NoteWindowedVideoMouseActivity();
+            if (!g_trackingVideoMouseLeave) {
+                TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
+                if (TrackMouseEvent(&tme)) g_trackingVideoMouseLeave = true;
+            }
+        }
+        return 0;
+    case WM_MOUSELEAVE:
+        if (!g_fullscreen) {
+            g_trackingVideoMouseLeave = false;
+            g_cursorOverVideo = false;
+            SetWindowedCursorHidden(false);
         }
         return 0;
     case WM_SETCURSOR:
-        if (g_fullscreen && g_fullscreenCursorHidden &&
+        if (((g_fullscreen && g_fullscreenCursorHidden) ||
+             (!g_fullscreen && g_windowedCursorHidden)) &&
             LOWORD(lParam) == HTCLIENT) {
             SetCursor(nullptr);
             return TRUE;
@@ -4332,6 +5234,7 @@ void CreateUi(HWND hwnd) {
     g_speedDown = CreateButton(g_panel, IDC_SPEED_DOWN);
     g_speedUp = CreateButton(g_panel, IDC_SPEED_UP);
     g_autoNext = CreateButton(g_panel, IDC_AUTO_NEXT);
+    g_loopCurrent = CreateButton(g_panel, IDC_LOOP_CURRENT);
     g_playlistOsd = CreateButton(g_panel, IDC_PLAYLIST_OSD);
     g_playlistMenu = CreateButton(g_panel, IDC_PLAYLIST_MENU);
     g_audio = CreateButton(g_panel, IDC_AUDIO);
@@ -4442,6 +5345,18 @@ bool ExecuteShortcutAction(ShortcutAction action) {
                        g_subtitleDelayTouched); return true;
     case ShortcutAction::MediaInfo:
         ToggleMediaInfo(); return true;
+    case ShortcutAction::ToggleLoopCurrent:
+        ToggleLoopCurrentFile(); return true;
+    case ShortcutAction::PreciseSeekBackward:
+        PreciseSeekBy(-kSeekStepSeconds); return true;
+    case ShortcutAction::PreciseSeekForward:
+        PreciseSeekBy(kSeekStepSeconds); return true;
+    case ShortcutAction::TakeScreenshot:
+        TakeScreenshot(); return true;
+    case ShortcutAction::PreviousFrame:
+        FrameStep(false); return true;
+    case ShortcutAction::NextFrame:
+        FrameStep(true); return true;
     case ShortcutAction::Count:
         break;
     }
@@ -4825,7 +5740,10 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
         const int ids[] = {
             IDC_OPT_DELAY, IDC_OPT_OSD_SIZE, IDC_OPT_OSD, IDC_OPT_PLAYLIST_START_OSD,
             IDC_OPT_GPU_API, IDC_OPT_SUB_SIZE, IDC_OPT_AUDIO_LANG, IDC_OPT_SUB_LANG,
-            IDC_OPT_EXIT_FULLSCREEN_END, IDC_OPT_SHORTCUTS, IDOK, IDCANCEL
+            IDC_OPT_EXIT_FULLSCREEN_END, IDC_OPT_INSTANCE_BEHAVIOR,
+            IDC_OPT_HIDE_WINDOWED_CURSOR, IDC_OPT_TASKBAR_BUTTONS,
+            IDC_OPT_SHOW_STOP_BUTTON, IDC_OPT_SCREENSHOT_FOLDER, IDC_OPT_SCREENSHOT_BROWSE,
+            IDC_OPT_SHORTCUTS, IDOK, IDCANCEL
         };
         for (int id : ids) {
             HWND child = GetDlgItem(dialog, id);
@@ -4878,6 +5796,35 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
                         g_preferredSubtitleLanguage.c_str());
         CheckDlgButton(dialog, IDC_OPT_EXIT_FULLSCREEN_END,
                        g_exitFullscreenOnPlaybackEnd ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog, IDC_OPT_HIDE_WINDOWED_CURSOR,
+                       g_hideWindowedCursor ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog, IDC_OPT_SHOW_STOP_BUTTON,
+                       g_showStopButton ? BST_CHECKED : BST_UNCHECKED);
+
+        HWND instanceCombo = GetDlgItem(dialog, IDC_OPT_INSTANCE_BEHAVIOR);
+        SendMessageW(instanceCombo, CB_ADDSTRING, 0,
+                     reinterpret_cast<LPARAM>(L"Open the new file in the existing instance"));
+        SendMessageW(instanceCombo, CB_ADDSTRING, 0,
+                     reinterpret_cast<LPARAM>(L"Pause existing instance and open a new instance"));
+        SendMessageW(instanceCombo, CB_ADDSTRING, 0,
+                     reinterpret_cast<LPARAM>(L"Just open a new instance"));
+        SendMessageW(instanceCombo, CB_SETCURSEL,
+                     static_cast<WPARAM>(g_instanceOpenBehavior), 0);
+        SendMessageW(instanceCombo, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1), 20);
+        SendMessageW(instanceCombo, CB_SETITEMHEIGHT, 0, 20);
+
+        HWND taskbarCombo = GetDlgItem(dialog, IDC_OPT_TASKBAR_BUTTONS);
+        SendMessageW(taskbarCombo, CB_ADDSTRING, 0,
+                     reinterpret_cast<LPARAM>(L"Play/Pause only"));
+        SendMessageW(taskbarCombo, CB_ADDSTRING, 0,
+                     reinterpret_cast<LPARAM>(L"Full controls"));
+        SendMessageW(taskbarCombo, CB_SETCURSEL,
+                     g_taskbarFullControls ? 1 : 0, 0);
+        SendMessageW(taskbarCombo, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1), 20);
+        SendMessageW(taskbarCombo, CB_SETITEMHEIGHT, 0, 20);
+
+        SetDlgItemTextW(dialog, IDC_OPT_SCREENSHOT_FOLDER,
+                        ScreenshotDirectory().wstring().c_str());
 
         RECT owner{}, dlg{};
         GetWindowRect(g_main, &owner);
@@ -4913,7 +5860,9 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
         auto* measure = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
         if (measure && (measure->CtlID == IDC_OPT_OSD ||
                         measure->CtlID == IDC_OPT_PLAYLIST_START_OSD ||
-                        measure->CtlID == IDC_OPT_GPU_API)) {
+                        measure->CtlID == IDC_OPT_GPU_API ||
+                        measure->CtlID == IDC_OPT_INSTANCE_BEHAVIOR ||
+                        measure->CtlID == IDC_OPT_TASKBAR_BUTTONS)) {
             measure->itemHeight = 20;
             return TRUE;
         }
@@ -4924,7 +5873,9 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
         auto* draw = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
         if (draw && (draw->CtlID == IDC_OPT_OSD ||
                      draw->CtlID == IDC_OPT_PLAYLIST_START_OSD ||
-                     draw->CtlID == IDC_OPT_GPU_API)) {
+                     draw->CtlID == IDC_OPT_GPU_API ||
+                     draw->CtlID == IDC_OPT_INSTANCE_BEHAVIOR ||
+                     draw->CtlID == IDC_OPT_TASKBAR_BUTTONS)) {
             const bool selected = (draw->itemState & ODS_SELECTED) != 0;
             const COLORREF background = selected ? RGB(48, 48, 48) : RGB(28, 28, 28);
 
@@ -4974,6 +5925,17 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
 
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
+        case IDC_OPT_SCREENSHOT_BROWSE: {
+            wchar_t current[32768]{};
+            GetDlgItemTextW(dialog, IDC_OPT_SCREENSHOT_FOLDER, current,
+                            static_cast<int>(std::size(current)));
+            std::wstring selected = current;
+            if (BrowseForScreenshotFolder(dialog, selected)) {
+                SetDlgItemTextW(dialog, IDC_OPT_SCREENSHOT_FOLDER, selected.c_str());
+            }
+            return TRUE;
+        }
+
         case IDC_OPT_SHORTCUTS:
             DialogBoxParamW(g_instance, MAKEINTRESOURCEW(203), dialog,
                             ShortcutsProc, 0);
@@ -5027,6 +5989,53 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
             g_preferredSubtitleLanguage = sub;
             g_exitFullscreenOnPlaybackEnd =
                 IsDlgButtonChecked(dialog, IDC_OPT_EXIT_FULLSCREEN_END) == BST_CHECKED;
+            g_hideWindowedCursor =
+                IsDlgButtonChecked(dialog, IDC_OPT_HIDE_WINDOWED_CURSOR) == BST_CHECKED;
+            g_showStopButton =
+                IsDlgButtonChecked(dialog, IDC_OPT_SHOW_STOP_BUTTON) == BST_CHECKED;
+
+            HWND instanceCombo = GetDlgItem(dialog, IDC_OPT_INSTANCE_BEHAVIOR);
+            const int instanceSel = static_cast<int>(
+                SendMessageW(instanceCombo, CB_GETCURSEL, 0, 0));
+            g_instanceOpenBehavior = static_cast<InstanceOpenBehavior>(
+                std::clamp(instanceSel, 0, 2));
+
+            HWND taskbarCombo = GetDlgItem(dialog, IDC_OPT_TASKBAR_BUTTONS);
+            const int taskbarSel = static_cast<int>(
+                SendMessageW(taskbarCombo, CB_GETCURSEL, 0, 0));
+            g_taskbarFullControls = taskbarSel == 1;
+
+            wchar_t screenshotFolder[32768]{};
+            GetDlgItemTextW(dialog, IDC_OPT_SCREENSHOT_FOLDER, screenshotFolder,
+                            static_cast<int>(std::size(screenshotFolder)));
+            std::wstring requestedScreenshotFolder = screenshotFolder;
+            while (!requestedScreenshotFolder.empty() &&
+                   (requestedScreenshotFolder.back() == L' ' ||
+                    requestedScreenshotFolder.back() == L'\\' ||
+                    requestedScreenshotFolder.back() == L'/')) {
+                // Preserve a drive root such as C:\ while trimming decorative
+                // trailing separators from normal folder paths.
+                if (requestedScreenshotFolder.size() == 3 &&
+                    requestedScreenshotFolder[1] == L':' &&
+                    (requestedScreenshotFolder[2] == L'\\' ||
+                     requestedScreenshotFolder[2] == L'/')) break;
+                requestedScreenshotFolder.pop_back();
+            }
+            const std::filesystem::path defaultScreenshotFolder =
+                DefaultScreenshotDirectory();
+            if (requestedScreenshotFolder.empty() ||
+                _wcsicmp(requestedScreenshotFolder.c_str(),
+                         defaultScreenshotFolder.wstring().c_str()) == 0) {
+                g_screenshotDirectory.clear();
+            } else {
+                g_screenshotDirectory = requestedScreenshotFolder;
+            }
+
+            if (!g_hideWindowedCursor) {
+                SetWindowedCursorHidden(false);
+            }
+
+            LayoutChildren(g_main);
 
             if (g_mpvReady) {
                 if (!g_preferredAudioLanguage.empty()) {
@@ -5040,6 +6049,10 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
                 if (g_playlistOsdVisible) ShowPlaylistOsd();
                 else UpdateOsdPosition();
             }
+
+            const bool idle = !g_mpvReady || MpvGetFlag("idle-active", true);
+            const bool paused = !idle && MpvGetFlag("pause", true);
+            UpdateTaskbarButtons(idle, paused, true);
 
             SaveSettings();
             EndDialog(dialog, IDOK);
@@ -5130,6 +6143,11 @@ void HandleCommand(int id) {
     case IDC_AUTO_NEXT:
     case IDM_AUTO_NEXT_FILE:
         ToggleAutoPlayNextFile(); break;
+    case IDC_LOOP_CURRENT:
+    case IDM_LOOP_CURRENT_FILE:
+        ToggleLoopCurrentFile(); break;
+    case IDM_FILE_SCREENSHOT:
+        TakeScreenshot(); break;
     case IDC_PLAYLIST_OSD:
         TogglePlaylistOsd(); break;
     case IDM_PLAYLIST_SHOW:
@@ -5156,8 +6174,18 @@ void HandleCommand(int id) {
     case IDM_VIEW_MEDIA_INFO:
         ToggleMediaInfo(); break;
     case IDM_VIEW_OPTIONS:
-        DialogBoxParamW(g_instance, MAKEINTRESOURCEW(201), g_main,
-                        OptionsProc, 0);
+        if (DialogBoxParamW(g_instance, MAKEINTRESOURCEW(201), g_main,
+                            OptionsProc, 0) == IDOK) {
+            // OptionsProc applies settings while the modal dialog is still active.
+            // Run one final layout after it has actually closed so controls that
+            // appear/disappear (notably the optional Stop button) cannot leave
+            // PLAYLIST / SUB / AUD using an intermediate geometry.
+            LayoutChildren(g_main);
+            if (g_panel) {
+                RedrawWindow(g_panel, nullptr, nullptr,
+                             RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+            }
+        }
         break;
     case IDM_VIEW_OPEN_MPV_CONFIG:
         OpenMpvConfig();
@@ -5172,6 +6200,12 @@ void HandleCommand(int id) {
 }
 
 LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (g_taskbarButtonCreatedMsg != 0 &&
+        msg == g_taskbarButtonCreatedMsg) {
+        InitializeTaskbarButton();
+        return 0;
+    }
+
     switch (msg) {
     case WM_CREATE:
         ApplyDarkTheme(hwnd);
@@ -5191,7 +6225,59 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_APPCOMMAND:
         if (HandleMediaAppCommand(lParam)) return TRUE;
         break;
+    case WM_COPYDATA: {
+        const auto* copy = reinterpret_cast<const COPYDATASTRUCT*>(lParam);
+        if (!copy) return FALSE;
+
+        if (copy->dwData == kCopyDataPausePlayback) {
+            PausePlaybackIfPlaying();
+            return static_cast<LRESULT>(kCopyDataAck);
+        }
+
+        if (copy->dwData == kCopyDataOpenFiles) {
+            if (!g_mpvReady || !copy->lpData ||
+                copy->cbData < sizeof(wchar_t) * 2 ||
+                copy->cbData % sizeof(wchar_t) != 0) {
+                return FALSE;
+            }
+
+            const auto* data = static_cast<const wchar_t*>(copy->lpData);
+            const size_t count = copy->cbData / sizeof(wchar_t);
+            std::vector<std::wstring> paths;
+
+            size_t offset = 0;
+            while (offset < count && data[offset] != L'\0') {
+                size_t end = offset;
+                while (end < count && data[end] != L'\0') ++end;
+                if (end >= count) return FALSE;
+                paths.emplace_back(data + offset, end - offset);
+                offset = end + 1;
+            }
+
+            if (paths.empty()) return FALSE;
+            LoadPlaylist(paths);
+
+            if (IsIconic(g_main)) ShowWindow(g_main, SW_RESTORE);
+            SetForegroundWindow(g_main);
+            return static_cast<LRESULT>(kCopyDataAck);
+        }
+        return FALSE;
+    }
     case WM_COMMAND:
+        if (HIWORD(wParam) == THBN_CLICKED) {
+            switch (LOWORD(wParam)) {
+            case kTaskbarPreviousButtonId:
+                SeekBy(-kSeekStepSeconds); return 0;
+            case kTaskbarStopButtonId:
+                StopPlayback(); return 0;
+            case kTaskbarPlayPauseButtonId:
+                TogglePlay(); return 0;
+            case kTaskbarNextButtonId:
+                SeekBy(kSeekStepSeconds); return 0;
+            case kTaskbarFullscreenButtonId:
+                ToggleFullscreenFromTaskbar(); return 0;
+            }
+        }
         HandleCommand(LOWORD(wParam));
         return 0;
     case WM_APP_AUTO_NEXT_FILE:
@@ -5232,12 +6318,18 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         if (wParam == TIMER_MPV_POLL) {
             PollMpv();
+            CheckWindowedCursorHide();
             return 0;
         }
         if (wParam == TIMER_PLAYLIST_OSD_RESTORE) {
             KillTimer(hwnd, TIMER_PLAYLIST_OSD_RESTORE);
             if (g_playlistOsdVisible) RenderPlaylistOverlay();
             else RemovePlaylistOverlay();
+            return 0;
+        }
+        if (wParam == TIMER_TASKBAR_ACTIVATE) {
+            KillTimer(hwnd, TIMER_TASKBAR_ACTIVATE);
+            ActivateMainWindowFromTaskbar();
             return 0;
         }
         break;
@@ -5252,6 +6344,10 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         KillTimer(hwnd, TIMER_FULLSCREEN_HOVER);
         KillTimer(hwnd, TIMER_MPV_POLL);
         KillTimer(hwnd, TIMER_PLAYLIST_OSD_RESTORE);
+        KillTimer(hwnd, TIMER_TASKBAR_ACTIVATE);
+        SetWindowedCursorHidden(false);
+        ReleaseTaskbarInterface();
+        DestroyTaskbarGlyphIcons();
         ShutdownMpv();
         PostQuitMessage(0);
         return 0;
@@ -5342,8 +6438,78 @@ bool RegisterClasses() {
 
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int showCommand) {
     LoadSettings();
+
+    int startupArgc = 0;
+    LPWSTR* startupArgv = CommandLineToArgvW(GetCommandLineW(), &startupArgc);
+    std::vector<std::wstring> startupPaths;
+    if (startupArgv && startupArgc > 1) {
+        startupPaths.reserve(static_cast<size_t>(startupArgc - 1));
+        for (int i = 1; i < startupArgc; ++i) {
+            if (startupArgv[i] && *startupArgv[i]) {
+                startupPaths.push_back(AbsoluteLocalPath(startupArgv[i]));
+            }
+        }
+    }
+    if (startupArgv) LocalFree(startupArgv);
+
+    if (!startupPaths.empty()) {
+        HWND existing = FindWindowW(kMainClass, nullptr);
+        if (existing) {
+            auto sendCopyData = [&](ULONG_PTR kind,
+                                    const std::vector<std::wstring>* paths) {
+                COPYDATASTRUCT copy{};
+                copy.dwData = kind;
+                std::vector<wchar_t> payload;
+
+                if (paths) {
+                    size_t chars = 1;
+                    for (const auto& path : *paths) chars += path.size() + 1;
+                    payload.reserve(chars);
+                    for (const auto& path : *paths) {
+                        payload.insert(payload.end(), path.begin(), path.end());
+                        payload.push_back(L'\0');
+                    }
+                    payload.push_back(L'\0');
+                    copy.cbData = static_cast<DWORD>(
+                        payload.size() * sizeof(wchar_t));
+                    copy.lpData = payload.data();
+                }
+
+                DWORD_PTR result = 0;
+                const LRESULT sent = SendMessageTimeoutW(
+                    existing, WM_COPYDATA, 0,
+                    reinterpret_cast<LPARAM>(&copy),
+                    SMTO_ABORTIFHUNG | SMTO_BLOCK, 1500, &result);
+                // Require our explicit protocol ACK. An older build that does not
+                // handle WM_COPYDATA may let DefWindowProc return TRUE (1), which
+                // must not be mistaken for a successful file handoff.
+                return sent != 0 && result == kCopyDataAck;
+            };
+
+            if (g_instanceOpenBehavior ==
+                InstanceOpenBehavior::OpenInExisting) {
+                if (sendCopyData(kCopyDataOpenFiles, &startupPaths)) {
+                    if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
+                    SetForegroundWindow(existing);
+                    return 0;
+                }
+                // If an older or busy instance cannot accept the handoff,
+                // fall through and open normally rather than losing the file.
+            } else if (g_instanceOpenBehavior ==
+                       InstanceOpenBehavior::PauseExistingAndOpenNew) {
+                sendCopyData(kCopyDataPausePlayback, nullptr);
+            }
+        }
+    }
+
     LoadResumePositions();
     g_instance = instance;
+    const HRESULT comResult =
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool comInitialized = SUCCEEDED(comResult);
+    g_taskbarButtonCreatedMsg =
+        RegisterWindowMessageW(L"TaskbarButtonCreated");
+
     EnableDarkModeForApp();
     g_panelBrush = CreateSolidBrush(C_PANEL);
     g_editBrush = CreateSolidBrush(RGB(28, 28, 28));
@@ -5361,6 +6527,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int showCommand) {
 
     if (!RegisterClasses()) {
         MessageBoxW(nullptr, L"Could not register the native player window classes.", kAppTitle, MB_OK | MB_ICONERROR);
+        if (comInitialized) CoUninitialize();
         return 1;
     }
     BuildMenus();
@@ -5380,6 +6547,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int showCommand) {
                              nullptr, nullptr, instance, nullptr);
     if (!g_main) {
         MessageBoxW(nullptr, L"Could not create the main player window.", kAppTitle, MB_OK | MB_ICONERROR);
+        if (comInitialized) CoUninitialize();
         return 1;
     }
 
@@ -5405,17 +6573,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int showCommand) {
     if (g_video) InvalidateRect(g_video, nullptr, TRUE);
     if (mpvInitialized) SetTimer(g_main, TIMER_MPV_POLL, 250, nullptr);
 
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (argv && argc > 1) {
-        std::vector<std::wstring> paths;
-        paths.reserve(static_cast<size_t>(argc - 1));
-        for (int i = 1; i < argc; ++i) {
-            if (argv[i] && *argv[i]) paths.emplace_back(argv[i]);
-        }
-        LoadPlaylist(paths);
+    if (!startupPaths.empty()) {
+        LoadPlaylist(startupPaths);
     }
-    if (argv) LocalFree(argv);
 
     MSG msg{};
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
@@ -5442,5 +6602,6 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int showCommand) {
     if (g_seekFillBrush) DeleteObject(g_seekFillBrush);
     if (g_chapterMarkerBrush) DeleteObject(g_chapterMarkerBrush);
     if (g_seekPlayheadBrush) DeleteObject(g_seekPlayheadBrush);
+    if (comInitialized) CoUninitialize();
     return static_cast<int>(msg.wParam);
 }

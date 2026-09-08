@@ -23,11 +23,11 @@ from the exact MSYS2 packages represented by the bundled DLLs. Source collection
 is deliberately not part of normal development builds because the official source
 archives can be large and require internet access.
 
-A successful 0.4.5 release-mode build should produce:
+A successful 0.4.7 release-mode build should produce:
 
-- `MPV-WinterStatic-Edition-0.4.5-portable/` (or a numeric-suffixed folder if the canonical folder was locked)
-- `MPV-WinterStatic-Edition-0.4.5-runtime-source/`
-- `MPV-WinterStatic-Edition-0.4.5-Runtime-Source.zip` when MSYS2 `bsdtar` is available
+- `MPV-WinterStatic-Edition-0.4.7-portable/` (or a numeric-suffixed folder if the canonical folder was locked)
+- `MPV-WinterStatic-Edition-0.4.7-runtime-source/`
+- `MPV-WinterStatic-Edition-0.4.7-Runtime-Source.zip` when MSYS2 `bsdtar` is available
 
 If release source collection fails, do not publish that Full Portable binary until
 the matching source bundle has been completed successfully.
@@ -69,10 +69,10 @@ than trying to maintain a hand-written list of only copyleft dependencies.
 
 ## Suggested release assets
 
-1. **Full Portable** — frontend plus the tested `libmpv/` runtime.
-2. **Runtime Source** — the generated `MPV-WinterStatic-Edition-0.4.5-Runtime-Source.zip`.
-3. **Repository source** — GitHub's repository/tag source archive, containing the frontend and build scripts.
-4. **Frontend-only** (optional) — for advanced users who intentionally supply a compatible libmpv runtime.
+1. **Full Portable** - frontend plus the tested `libmpv/` runtime.
+2. **Runtime Source** - the generated `MPV-WinterStatic-Edition-0.4.7-Runtime-Source.zip`.
+3. **Repository source** - GitHub's repository/tag source archive, containing the frontend and build scripts.
+4. **Frontend-only** (optional) - for advanced users who intentionally supply a compatible libmpv runtime.
 
 Once a stable runtime binary asset exists on a GitHub Release, the missing-runtime
 dialog can later be extended to download that project-owned, known-compatible

@@ -1,7 +1,6 @@
-[README.md](https://github.com/user-attachments/files/31760161/README.md)
 MPV WinterStatic Edition
-Version 0.4.6
-===================
+Version 0.4.7
+============================
 
 MPV WinterStatic Edition is a lightweight native Win32 frontend for libmpv.
 Its interface is intentionally MPC-style, but the frontend is independently
@@ -19,6 +18,9 @@ WHAT IS IN THIS BUILD KIT
 
 - main.cpp
   Native Win32 frontend source.
+
+- mpv-winterstatic-edition-screenshot.png
+  Screenshot used by the GitHub README.
 
 - resource.rc
   Windows resources, dialogs, icons, and version metadata.
@@ -73,7 +75,7 @@ Run:
 
 When successful, the build creates:
 
-    MPV-WinterStatic-Edition-0.4.5-portable
+    MPV-WinterStatic-Edition-0.4.7-portable
 
 If that folder already exists and cannot be replaced, the build script may add
 a numeric suffix.
@@ -99,8 +101,8 @@ exact installed version.
 
 A successful release-mode build additionally creates:
 
-    MPV-WinterStatic-Edition-0.4.5-runtime-source\
-    MPV-WinterStatic-Edition-0.4.5-Runtime-Source.zip
+    MPV-WinterStatic-Edition-0.4.7-runtime-source\
+    MPV-WinterStatic-Edition-0.4.7-Runtime-Source.zip
 
 The source bundle contains:
 
@@ -168,9 +170,14 @@ Settings include:
 - last manually selected subtitle track signature (including Off)
 - AUTO / auto-play-next-file state
 - exit-fullscreen-at-final-end preference
+- behavior when another file is opened while the player is already running
+- windowed-video cursor auto-hide
+- taskbar thumbnail button layout (Play/Pause only / Full controls)
+- screenshot save folder
 - volume
 - mute state
 - custom keyboard shortcuts
+- Show Stop button on toolbars (off by default)
 
 Fresh-install defaults include:
 
@@ -181,6 +188,12 @@ Fresh-install defaults include:
 - Playlist OSD at start of new video: Nothing
 - GPU API: Auto
 - Exit fullscreen when playback ends: enabled
+- opening another file: use the existing instance
+- Hide cursor over playing video after inactivity: enabled
+- Taskbar thumbnail buttons: Play/Pause only
+- Show Stop button on toolbars: Off
+- Screenshot save folder: Pictures\MPV WinterStatic Edition\
+- LOOP current file: Off (session-only; not saved)
 - volume: 70%
 
 CONTROLS
@@ -188,26 +201,36 @@ CONTROLS
 
 Default keyboard / mouse bindings:
 
-- Space: Play / Pause
+- Space / Media Play/Pause: Play / Pause
+- Explicit Play/Pause actions show a brief play/pause symbol in the transient OSD
 - F / Enter: Fullscreen
 - Esc: Exit fullscreen
-- Left / Right: Seek backward / forward 5 seconds
+- Left / Right: Fast seek backward / forward 5 seconds using mpv's normal
+  relative keyframe seek
+- , / .: Previous / next frame
+- /: Take a screenshot
 - Up / Down: Volume up / down
-- Ctrl+Left / Media Previous: Previous chapter
-- Ctrl+Right / Media Next: Next chapter
+- Shift+Left / Media Previous: Previous chapter
+- Shift+Right / Media Next: Next chapter
 - M: Mute
 - I: Toggle Media Info
 - P: Toggle the current mpv playlist OSD on / off
-- Page Up / Ctrl+Up: Previous playlist item
-- Page Down / Ctrl+Down: Next playlist item
+- Page Up / Ctrl+Up: Previous playlist item; with AUTO and no explicit
+  multi-file playlist, previous supported file in the folder
+- Page Down / Ctrl+Down: Next playlist item; with AUTO and no explicit
+  multi-file playlist, next supported file in the folder
 - A: Cycle audio tracks
 - S: Cycle subtitles (Off -> track 1 -> track 2 -> ... -> Off)
 - AUTO toolbar button: Toggle auto-play next media file in the current folder
+- LOOP toolbar button: Toggle repeat-current-file for this session; starts Off on every launch
 - Mouse wheel: Volume
 - Single-click video: Play / Pause
 - Double-click video: Fullscreen
 - Fullscreen: mouse cursor hides after a short idle period over the video
 - Seek bar: click seeks on release; dragging seeks live while playback continues
+- Windows taskbar thumbnail preview: Play/Pause by default; Options can enable
+  Seek back 5 seconds / Play-Pause / Seek forward 5 seconds / Fullscreen. Stop
+  joins the full layout only when Show Stop button on toolbars is enabled.
 
 Keyboard shortcuts can be changed from:
 
@@ -217,25 +240,58 @@ Each action has a Primary and Alternate binding. Assigning a shortcut already
 used elsewhere moves that shortcut to the newly selected action so one key
 combination cannot silently trigger two actions. "Clear selected" removes one
 binding, and "Restore defaults" restores the original WinterStatic Edition layout.
-The six audio/subtitle delay actions are available here but intentionally have
-no default keys. Delay changes use 50 ms steps and reset to 0 for the next file.
+Media Play/Pause is the alternate default shortcut for Play / Pause, not a
+hard-coded control; it can be reassigned or cleared. Media Volume Up/Down are
+available to assign manually but are left unbound by default because Windows
+may also apply them to system volume. Precise seek backward/forward, the six
+audio/subtitle delay actions, and Toggle LOOP current file are also available
+here without default keys. Previous/Next Frame default to comma/period.
+Precise seek keeps the older absolute time-pos
+behavior for users who prefer exact landing. Delay changes use 50 ms steps and
+reset to 0 for the next file.
+
+Screenshots:
+
+- `/` takes a PNG screenshot using libmpv.
+- Screenshots include subtitles but not the normal OSD.
+- Files default to `Pictures\MPV WinterStatic Edition\` with unique
+  timestamped filenames. The save folder can be changed in Options.
+- File -> Take screenshot exposes the same action and its shortcut can be
+  reassigned from the Keyboard Shortcuts dialog.
 
 Bottom controls:
 
 - Play / Pause
-- Stop
+- Stop (shown only when enabled in Options; hidden by default)
 - Previous chapter
 - Seek backward
 - Seek forward
 - Next chapter
 - Playback speed down / up
 - AUTO next-file toggle
+- LOOP current-file toggle
 - PLAYLIST: toggle the current playlist OSD on / off
 - Playlist triangle: open the clickable playlist menu
 - Subtitle track menu
 - Audio track menu
 - Mute
 - Volume
+
+INSTANCE HANDLING
+-----------------
+
+When a file is opened from Explorer or the command line while another
+MPV WinterStatic Edition window is already running, Options provides three
+behaviors:
+
+- Open the new file in the existing instance (default)
+- Pause the existing instance and open a new instance
+- Just open a new instance
+
+Existing-instance handoff uses a small native Win32 message between
+MPV WinterStatic Edition windows. If an older/busy instance cannot accept the
+handoff, the new process opens normally so the requested file is not lost.
+
 
 RIGHT-CLICK MENU
 ----------------
@@ -245,6 +301,7 @@ The video context menu provides:
 - Open
 - Play / Pause
 - Stop
+- Loop current file
 - Auto-play next file in folder
 - cascading Playlist submenu with Show / Previous / Next and clickable entries
 - cascading Audio tracks submenu
@@ -338,7 +395,7 @@ Executable:
 
 The About dialog identifies this build as:
 
-    Version 0.4.5
+    Version 0.4.7
 
 The About dialog also credits:
 
@@ -371,6 +428,61 @@ compliance work.
 
 VERSION HISTORY
 ---------------
+
+0.4.7 SEEK / FRAME STEP / SCREENSHOTS / PLAYBACK FIXES
+----------------------------------------------------------
+- Normal Seek backward/forward now delegates directly to libmpv using
+  `relative+keyframes`, giving repeated Left/Right seeking the same fast,
+  keyframe-based behavior as standalone mpv. Left/Right remain 5-second seeks.
+- Preserved the previous exact absolute `time-pos` seek implementation as
+  separate Precise seek backward/forward shortcut actions. They are unbound by
+  default so users can choose exact landing without slowing normal seeking.
+- Fixed the fast forward-seek EOF edge case with AUTO. When the next 5-second
+  forward seek would reach or pass the end, only that final hop uses the
+  preserved exact EOF path so AUTO can advance to the next folder file. A
+  deliberate seek to EOF still does not count as a natural finish for the
+  optional fullscreen-exit behavior.
+- Added Take screenshot, bound to `/` by default and also available from the
+  File menu. Screenshots are lossless PNG files with subtitles included and the
+  normal OSD excluded, using unique timestamped filenames.
+- Added a configurable screenshot save folder in Options. The default remains
+  `Pictures\MPV WinterStatic Edition\`. Successful captures show a brief OSD
+  confirmation containing the saved filename.
+- Added Previous Frame and Next Frame using libmpv's native `frame-back-step`
+  and `frame-step` commands. Comma and period are the default shortcuts.
+- Changed the default Previous/Next chapter shortcuts from Ctrl+Left/Right to
+  Shift+Left/Right. Media Previous/Next remain alternate bindings. Untouched old
+  defaults are migrated while custom bindings are preserved.
+- Fixed Stop leaving libmpv idle with no reliable shared Play path back to the
+  stopped item. Stop now preserves libmpv's authoritative playlist, remembers
+  the stopped playlist index, and Play restarts that same item from the start.
+  The one intentional restart suppresses frontend resume restoration.
+- Added Options -> Show Stop button on toolbars. It is Off by default. When Off,
+  Stop is hidden from both the bottom toolbar and the optional full taskbar
+  thumbnail controls. The Stop action remains available through menus and the
+  configurable Keyboard Shortcuts editor.
+- Updated the optional full taskbar thumbnail layout to use Seek back 5 seconds,
+  optional Stop, Play/Pause, Seek forward 5 seconds, and Fullscreen. The seek
+  controls now work on ordinary chapterless media instead of depending on
+  chapter navigation.
+- Hardened taskbar Fullscreen handling. A minimized player is restored before
+  fullscreen saves its windowed placement, the thumbnail flyout is dismissed,
+  and the real player window is brought to the foreground automatically. This
+  also fixes the bad blue windowed state that could appear after leaving a
+  taskbar-triggered fullscreen session.
+- Added a final bottom-toolbar relayout and repaint after Options closes so
+  toggling the optional Stop button cannot leave PLAYLIST / SUB / AUD controls
+  temporarily squashed.
+- Improved runtime-license collection performance. Standard MSYS2 license
+  directories are read directly first, unresolved packages use the installed
+  pacman database, and only unusual unresolved packages fall back to one batched
+  `pacman -Ql` pass. This avoids the long silent package enumeration that could
+  appear to hang or consume excessive CPU during packaging.
+- No playlist ownership model, LOOP behavior, resume format, track-memory model,
+  audio/subtitle sync, GPU selection, instance-handoff model, or release-source
+  compliance behavior is intentionally changed except where explicitly noted
+  above.
+
 
 0.4.6 WINDOWS INTEGRATION / NAVIGATION / LOOP / PLAYBACK OSD
 ---------------------------------------------------------------
@@ -415,6 +527,7 @@ VERSION HISTORY
   does not persist.
 - No libmpv runtime, resume format, playlist ownership, track-memory, GPU,
   audio/subtitle sync, or release-source behavior is intentionally changed.
+
 
 0.4.5 RELEASE SOURCE AUTOMATION
 --------------------------------
@@ -1000,7 +1113,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
   process-lifetime icon handle.
 - No playback or UI behavior was intentionally changed in this release.
 
-
 0.2.22 SETTINGS / BUILD RECOVERY
 --------------------------------
 - Rebuilt from the known-working 0.2.20 source after the 0.2.21 intermediate
@@ -1012,14 +1124,12 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Added a temporary SETTINGS-PATH.txt diagnostic marker showing which
   settings.ini the player was using.
 
-
 0.2.21 ABANDONED INTERMEDIATE BUILD
 -----------------------------------
 - Experimental intermediate build.
 - An edit accidentally removed unrelated helper functions, so this version was
   abandoned rather than used as the next working baseline.
 - Development resumed from the known-good 0.2.20 source for 0.2.22.
-
 
 0.2.20 DIRECT SETTINGS I/O
 --------------------------
@@ -1031,7 +1141,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Removed Windows INI caching/mapping from the volume and mute persistence path
   while retaining a human-readable settings.ini.
 
-
 0.2.19 SETTINGS WRITE-THROUGH
 -----------------------------
 - Defined the fresh-install volume default once as kDefaultVolume instead of
@@ -1039,7 +1148,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - The builder now explicitly creates settings.ini with the current defaults.
 - Settings writes are explicitly flushed so volume and mute changes are
   committed before the application exits.
-
 
 0.2.18 AUDIO PERSISTENCE / OSD DEFAULT
 --------------------------------------
@@ -1050,7 +1158,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
   cannot bypass persistence.
 - Settings remain portable beside the EXE.
 
-
 0.2.17 DEFAULTS / MEDIA INFO PLACEMENT
 --------------------------------------
 - Fresh installs now start maximised.
@@ -1059,10 +1166,9 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
   the multi-line stats overlay has room to fit onscreen.
 - Closing Media Info restores the user's normal OSD position.
 
-
 0.2.16 CONTEXT MENU / MEDIA INFO
 --------------------------------
-- Right-click Audio tracks and Subtitle tracks are now true cascading Win32
+- Right-click Audio tracks and Subtitle tracks are true cascading Win32
   submenus instead of opening a second popup from the toolbar.
 - Added Options directly to the video context menu.
 - Added Media Info using mpv's bundled stats overlay.
@@ -1070,7 +1176,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
   the I key.
 - Falls back to a short OSD message if the stats binding is unavailable in the
   packaged libmpv build.
-
 
 0.2.15 BRANDING / PERSISTENCE
 -----------------------------
@@ -1082,7 +1187,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Internal Win32 class-registration strings were intentionally left unchanged
   because they are not user-visible.
 
-
 0.2.14 MAINTENANCE
 ------------------
 - Added proper draining of libmpv's event queue during polling.
@@ -1093,7 +1197,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Added proper cleanup of the edit brush at shutdown.
 - Improved the build script's final portable-folder instructions.
 
-
 0.2.13 CHAPTER / FULLSCREEN VOLUME
 ----------------------------------
 - Added MPC-style one-pixel grey chapter markers to the seek bar using
@@ -1102,7 +1205,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Changing volume in fullscreen now shows only the percentage OSD without
   forcing the bottom control panel to appear.
 
-
 0.2.12 SUBTITLE / OSD CALIBRATION
 ---------------------------------
 - Added a persistent Subtitle size option, using mpv's default size of 55.
@@ -1110,7 +1212,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Improved Top Left OSD compensation for libass glyph-top padding.
 - Applied the same compensation to Golden Centre so the visible OSD lands
   approximately 38.2% down from the top.
-
 
 0.2.11 OSD POSITION / OPTIONS THEME
 -----------------------------------
@@ -1121,16 +1222,10 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
   dropdown use the player's dark charcoal theme rather than the default white
   Windows list.
 
-
-  0.2.10 INTERMEDIATE OSD / OPTIONS BUILD
+0.2.10 INTERMEDIATE OSD / OPTIONS BUILD
 ---------------------------------------
 - Carries forward the OSD-position and Options-theme work from 0.2.9.
-- Top Left OSD explicitly resets mpv alignment and margins and uses a
-  DPI-scaled safe inset.
-- Golden Centre remains positioned approximately 38.2% down from the top.
-- The OSD-position selector retains the dark owner-drawn appearance.
 - No additional behavior change is documented separately for this build.
-
 
 0.2.9 OSD POSITION / OPTIONS THEME
 ----------------------------------
@@ -1140,18 +1235,16 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - The OSD-position combo box is owner-drawn so both its closed field and
   dropdown list use the player's dark charcoal theme.
 
-
 0.2.8 OPTIONS / OSD / IDENTITY CLEANUP
 --------------------------------------
-- Changed the About window to a silent dark native dialog identifying the
-  player as an MPC-style native frontend powered by libmpv.
+- The About window uses a silent dark native dialog identifying the player as
+  an MPC-style native frontend powered by libmpv.
 - Correctly wired View -> Options.
 - Added OSD size to the Options dialog.
 - Set the default OSD size to 72 px.
 - Removed an old 24 px OSD override that was silently taking precedence over
   the newer setting.
 - Window size, position, and maximised state are restored on the next launch.
-
 
 0.2.7 OPTIONS / PERSISTENCE
 ---------------------------
@@ -1163,7 +1256,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Added a compact Options dialog for click delay, OSD position, preferred
   audio language, and preferred subtitle language.
 - Settings are stored beside the EXE in settings.ini.
-
 
 0.2.6 NATIVE UI POLISH
 ----------------------
@@ -1180,7 +1272,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
   code.
 - No intentional interface or playback changes from 0.2.4.
 
-
 0.2.4 NATIVE UI POLISH
 ----------------------
 - Reduced single-click Play / Pause delay to 70 ms.
@@ -1188,10 +1279,9 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Fixed the initial layout squeezing the track/status information.
 - Smoothed the speaker-wave graphics.
 - Added the currently loaded media filename to the window and taskbar title.
-- Added dynamic taskbar Play / Pause icon behavior.
-- Custom File / View / Play / Help menus now switch as the pointer moves
-  between them while a menu is open.
-
+- Added dynamic taskbar application-icon Play / Pause state behavior.
+- Custom File / View / Play / Help menus switch as the pointer moves between
+  them while a menu is open.
 
 0.2.3 PLAYBACK / OSD POLISH
 ---------------------------
@@ -1199,7 +1289,6 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Reduced the video single-click delay.
 - Tidied the speaker-button silhouette.
 - Kept AUD and SUB controls adjacent to the track information they control.
-
 
 0.2.2 FIRST NATIVE POLISH PASS
 ------------------------------
@@ -1210,14 +1299,12 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Added clearer volume and time readouts.
 - Reduced single-click response time while retaining double-click fullscreen.
 
-
 0.2.1 NATIVE VALIDATION BUILD
 -----------------------------
 - Continued testing of the initial native Win32/libmpv frontend.
 - No separately documented feature changes from 0.2.0.
 - Used to continue validating embedded libmpv playback and the portable
   runtime on the target Windows system.
-
 
 0.2.0 FIRST NATIVE WIN32 BUILD
 ------------------------------
@@ -1242,8 +1329,7 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 - Added recursive portable-runtime collection for libmpv / FFmpeg and their
   MinGW DLL dependencies.
 
-
- 0.1.0 EXPERIMENTAL QT BUILD
+0.1.0 EXPERIMENTAL QT BUILD
 ---------------------------
 - Experimental Qt-based frontend prototype.
 - Superseded by the native Win32/libmpv branch introduced in 0.2.0.

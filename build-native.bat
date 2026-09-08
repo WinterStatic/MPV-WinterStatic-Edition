@@ -5,11 +5,11 @@ cd /d "%~dp0"
 set "RELEASE_MODE=0"
 if /I "%~1"=="release" set "RELEASE_MODE=1"
 if not "%~1"=="" if "%RELEASE_MODE%"=="0" goto :bad_argument
-title MPV WinterStatic Edition - Native Build 0.4.5
+title MPV WinterStatic Edition - Native Build 0.4.7
 
 echo.
 echo ==========================================================
-echo   MPV WinterStatic Edition - Native Win32 Build 0.4.5
+echo   MPV WinterStatic Edition - Native Win32 Build 0.4.7
 echo ==========================================================
 echo.
 echo It compiles the Win32 frontend with MSVC and packages libmpv.
@@ -62,11 +62,11 @@ if errorlevel 1 goto :build_failed
 echo [2/4] Compiling native frontend...
 cl /nologo /std:c++17 /O2 /EHsc /MT /utf-8 /DUNICODE /D_UNICODE /Fo"%BUILD_OBJ%" main.cpp "%BUILD_RES%" ^
   /link /SUBSYSTEM:WINDOWS /OUT:"%BUILD_EXE%" ^
-  User32.lib Gdi32.lib Dwmapi.lib UxTheme.lib Comdlg32.lib Shell32.lib Shlwapi.lib
+  User32.lib Gdi32.lib Dwmapi.lib UxTheme.lib Comdlg32.lib Shell32.lib Shlwapi.lib Ole32.lib Uuid.lib
 if errorlevel 1 goto :build_failed
 if not exist "%BUILD_EXE%" goto :build_failed
 
-set "BASE_DIST=%CD%\MPV-WinterStatic-Edition-0.4.5-portable"
+set "BASE_DIST=%CD%\MPV-WinterStatic-Edition-0.4.7-portable"
 set "DIST=%BASE_DIST%"
 if not exist "%DIST%" goto :dist_ready
 rmdir /s /q "%DIST%" >nul 2>nul
@@ -117,6 +117,10 @@ if errorlevel 1 goto :package_failed
   echo Muted=0
   echo AutoPlayNextFile=0
   echo ExitFullscreenAtEnd=1
+  echo HideWindowedCursor=1
+  echo TaskbarFullControls=0
+  echo ShowStopButton=0
+  echo InstanceOpenBehavior=0
   echo OsdFontSize=72
   echo OsdPosition=1
   echo PlaylistStartOsd=0
@@ -149,7 +153,7 @@ if errorlevel 1 goto :package_failed
 
 > "%DIST%\BUILD-INFO.txt" (
   echo MPV WinterStatic Edition
-  echo Version 0.4.5
+  echo Version 0.4.7
   echo.
   echo Created by WinterStatic
   echo Developed with ChatGPT ^(OpenAI^)
@@ -211,10 +215,10 @@ exit /b 0
 
 :collect_release_source
 echo [release] Collecting exact MSYS2 runtime source archives...
-set "SOURCE_DIR=%CD%\MPV-WinterStatic-Edition-0.4.5-runtime-source"
-set "SOURCE_ZIP=%CD%\MPV-WinterStatic-Edition-0.4.5-Runtime-Source.zip"
-set "SOURCE_DIR_FWD=%CD:\=/%/MPV-WinterStatic-Edition-0.4.5-runtime-source"
-set "SOURCE_ZIP_FWD=%CD:\=/%/MPV-WinterStatic-Edition-0.4.5-Runtime-Source.zip"
+set "SOURCE_DIR=%CD%\MPV-WinterStatic-Edition-0.4.7-runtime-source"
+set "SOURCE_ZIP=%CD%\MPV-WinterStatic-Edition-0.4.7-Runtime-Source.zip"
+set "SOURCE_DIR_FWD=%CD:\=/%/MPV-WinterStatic-Edition-0.4.7-runtime-source"
+set "SOURCE_ZIP_FWD=%CD:\=/%/MPV-WinterStatic-Edition-0.4.7-Runtime-Source.zip"
 "C:\msys64\usr\bin\bash.exe" -lc "export PATH=/mingw64/bin:/usr/bin:$PATH; cd '%ROOT_FWD%'; ./collect-runtime-source.sh '%LIBMPV_FWD%' '%SOURCE_DIR_FWD%' '%SOURCE_ZIP_FWD%'"
 exit /b %ERRORLEVEL%
 

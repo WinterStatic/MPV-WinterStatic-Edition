@@ -185,7 +185,7 @@ manifest="$DIST/RUNTIME-MANIFEST.txt"
     echo
     echo "This manifest records binary provenance. RUNTIME-PACKAGES.tsv contains"
     echo "the machine-readable package/version/source-base mapping used by the"
-    echo "0.4.5 release-source collector."
+    echo "0.4.7 release-source collector."
 } > "$manifest"
 
 echo "  + RUNTIME-MANIFEST.txt"
@@ -212,41 +212,132 @@ license_root="$DIST/licenses"
 mkdir -p "$license_root"
 license_count=0
 
+copy_license_file() {
+    local package="$1"
+    local license_path="$2"
+    local package_dir base target stem ext suffix
+
+    [[ -n "$package" && -f "$license_path" ]] || return 0
+
+    package_dir="$license_root/$package"
+    mkdir -p "$package_dir"
+    base="${license_path##*/}"
+    target="$package_dir/$base"
+
+    # Preserve duplicate filenames from nested license directories.
+    if [[ -e "$target" ]]; then
+        stem="${base%.*}"
+        ext="${base##*.}"
+        suffix=2
+        while [[ -e "$target" ]]; do
+            if [[ "$stem" == "$base" ]]; then
+                target="$package_dir/${base}-${suffix}"
+            else
+                target="$package_dir/${stem}-${suffix}.${ext}"
+            fi
+            suffix=$((suffix + 1))
+        done
+    fi
+
+    cp -f "$license_path" "$target"
+    license_count=$((license_count + 1))
+}
+
 if (( ${#package_versions[@]} > 0 )); then
     echo "Collecting installed runtime license files..."
-    declare -a packages=("${!package_versions[@]}")
 
-    # Query all represented packages in one pacman invocation. Output from
-    # pacman -Ql begins with the package name, which lets us preserve a separate
-    # directory for each package without performing one database query per DLL.
-    while IFS=$'\t' read -r package license_path; do
-        [[ -n "$package" && -f "$license_path" ]] || continue
-        package_dir="$license_root/$package"
-        mkdir -p "$package_dir"
-        base="${license_path##*/}"
-        target="$package_dir/$base"
+    # MSYS2 packages normally install license text directly under
+    # <prefix>/share/licenses/<real-package-name>/. Read those directories
+    # directly first; this is much cheaper than asking pacman to enumerate all
+    # installed files for every represented package.
+    mapfile -t packages < <(printf '%s\n' "${!package_versions[@]}" | sort -f)
+    package_total=${#packages[@]}
+    package_index=0
+    declare -a pacman_fallback_packages=()
 
-        # Preserve duplicate filenames from nested license directories.
-        if [[ -e "$target" ]]; then
-            stem="${base%.*}"
-            ext="${base##*.}"
-            suffix=2
-            while [[ -e "$target" ]]; do
-                if [[ "$stem" == "$base" ]]; then
-                    target="$package_dir/${base}-${suffix}"
-                else
-                    target="$package_dir/${stem}-${suffix}.${ext}"
-                fi
-                ((suffix += 1))
-            done
+    local_db_license_files() {
+        local package="$1"
+        local desc files name entry
+
+        # Reuse pacman's local package database directly. Validate %NAME% so a
+        # package name that is a prefix of another cannot select the wrong entry.
+        for desc in /var/lib/pacman/local/"$package"-*/desc; do
+            [[ -f "$desc" ]] || continue
+            name="$(awk '$0 == "%NAME%" { getline; print; exit }' "$desc")"
+            [[ "$name" == "$package" ]] || continue
+            files="${desc%/desc}/files"
+            [[ -f "$files" ]] || return 1
+
+            awk '
+                $0 == "%FILES%" { in_files = 1; next }
+                in_files && /^%/ { exit }
+                in_files && /share\/licenses\// && $0 !~ /\/$/ { print "/" $0 }
+            ' "$files"
+            return 0
+        done
+
+        return 1
+    }
+
+    for package in "${packages[@]}"; do
+        package_index=$((package_index + 1))
+        printf '  [%d/%d] %s\n' "$package_index" "$package_total" "$package"
+
+        found_for_package=0
+        real_package="$package"
+        if [[ "$real_package" == mingw-w64-x86_64-* ]]; then
+            real_package="${real_package#mingw-w64-x86_64-}"
         fi
 
-        cp -f "$license_path" "$target"
-        ((license_count += 1))
-    done < <(
-        pacman -Ql "${packages[@]}" 2>/dev/null |
-        awk '$2 ~ /\/share\/licenses\// {print $1 "\t" $2}' || true
-    )
+        # Current MSYS2 convention uses the environment prefix directory with
+        # the environment prefix removed from the actual license directory. Use
+        # Bash globbing here instead of spawning a separate find.exe per package.
+        candidate_dirs=("/mingw64/share/licenses/$real_package")
+        if [[ "$real_package" != "$package" ]]; then
+            candidate_dirs+=("/mingw64/share/licenses/$package")
+        fi
+
+        shopt -s nullglob globstar
+        for candidate_dir in "${candidate_dirs[@]}"; do
+            [[ -d "$candidate_dir" ]] || continue
+            for license_path in "$candidate_dir"/**/*; do
+                [[ -f "$license_path" ]] || continue
+                copy_license_file "$package" "$license_path"
+                found_for_package=$((found_for_package + 1))
+            done
+        done
+        shopt -u globstar
+
+        if (( found_for_package == 0 )); then
+            # Reading /var/lib/pacman/local avoids starting a separate pacman
+            # process for each package. The local database is the same installed
+            # package inventory pacman -Ql would consult.
+            while IFS= read -r license_path; do
+                [[ -f "$license_path" ]] || continue
+                copy_license_file "$package" "$license_path"
+                found_for_package=$((found_for_package + 1))
+            done < <(local_db_license_files "$package" || true)
+        fi
+
+        if (( found_for_package == 0 )); then
+            pacman_fallback_packages+=("$package")
+        fi
+    done
+
+    # Keep a compatibility fallback for unusual package layouts/database states,
+    # but batch all such packages into ONE pacman invocation instead of launching
+    # pacman once per package.
+    if (( ${#pacman_fallback_packages[@]} > 0 )); then
+        printf '  Checking %d unresolved package(s) with one pacman fallback...\n' \
+            "${#pacman_fallback_packages[@]}"
+        while IFS=$'\t' read -r package license_path; do
+            [[ -n "$package" && -f "$license_path" ]] || continue
+            copy_license_file "$package" "$license_path"
+        done < <(
+            pacman -Ql "${pacman_fallback_packages[@]}" 2>/dev/null |
+            awk '$2 ~ /\/share\/licenses\// {print $1 "\t" $2}' || true
+        )
+    fi
 fi
 
 if (( license_count == 0 )); then

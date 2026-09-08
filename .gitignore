@@ -1,0 +1,23 @@
+# MSVC/build outputs
+*.obj
+*.res
+*.pdb
+MPV-WinterStatic-Edition.exe
+
+# Generated portable packages
+MPV-WinterStatic-Edition-*-portable/
+MPV-WinterStatic-Edition-*-portable-*/
+MPV-WinterStatic-Edition-*-runtime-source/
+MPV-WinterStatic-Edition-*-Runtime-Source.zip
+
+# IDE/local files
+.vs/
+x64/
+Debug/
+Release/
+*.user
+*.suo
+
+# OS clutter
+Thumbs.db
+Desktop.ini
