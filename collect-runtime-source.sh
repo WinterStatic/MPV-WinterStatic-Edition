@@ -9,7 +9,7 @@ MIRROR_BASE="https://mirror.msys2.org/mingw/sources"
 
 if [[ ! -f "$PACKAGE_TABLE" ]]; then
     echo "ERROR: $PACKAGE_TABLE was not found."
-    echo "Build the Full Portable runtime with 0.4.7 before collecting release source."
+    echo "Build the Full Portable runtime with 0.4.10 before collecting release source."
     exit 1
 fi
 
@@ -120,7 +120,7 @@ fi
 runtime_manifest_sha="$(sha256sum "$RUNTIME_DIR/RUNTIME-MANIFEST.txt" | awk '{print $1}')"
 {
     echo "MPV WinterStatic Edition - corresponding runtime source bundle"
-    echo "Version 0.4.7"
+    echo "Version 0.4.10"
     echo
     echo "Purpose"
     echo "-------"

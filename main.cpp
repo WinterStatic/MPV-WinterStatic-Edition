@@ -105,7 +105,7 @@ constexpr wchar_t kVolumeClass[] = L"MPVMPCNativeVolume";
 constexpr wchar_t kOverlayClass[] = L"MPVMPCNativeOverlay";
 
 constexpr wchar_t kAppTitle[] = L"MPV WinterStatic Edition";
-constexpr wchar_t kVersionText[] = L"Version 0.4.7";
+constexpr wchar_t kVersionText[] = L"Version 0.4.10";
 constexpr wchar_t kProjectUrl[] = L"https://github.com/WinterStatic/MPV-WinterStatic-Edition";
 
 constexpr int kMenuHeight = 24;
@@ -118,6 +118,7 @@ constexpr int kSeekStepSeconds = 5;
 constexpr int kSyncStepMs = 50;
 constexpr int kRevealEdge = 8;
 constexpr ULONGLONG kFullscreenCursorHideMs = 2000;
+constexpr int kWindowedCursorWakeDistancePx = 4;
 constexpr double kResumeMinSeconds = 5.0;
 constexpr double kResumeEndMarginMaxSeconds = 10.0;
 
@@ -145,6 +146,7 @@ constexpr UINT_PTR TIMER_PLAYLIST_OSD_RESTORE = 4;
 constexpr UINT_PTR TIMER_TASKBAR_ACTIVATE = 5;
 constexpr int64_t kPlaylistOverlayId = 1;
 constexpr UINT WM_APP_AUTO_NEXT_FILE = WM_APP + 1;
+constexpr UINT WM_APP_FINAL_FULLSCREEN_REDRAW = WM_APP + 2;
 
 constexpr ULONG_PTR kCopyDataOpenFiles = 0x57534F46; // "WSOF"
 constexpr ULONG_PTR kCopyDataPausePlayback = 0x57535041; // "WSPA"
@@ -178,6 +180,8 @@ constexpr int IDC_AUTO_NEXT = 1019;
 constexpr int IDC_PLAYLIST_OSD = 1020;
 constexpr int IDC_PLAYLIST_MENU = 1021;
 constexpr int IDC_LOOP_CURRENT = 1022;
+constexpr int IDC_PLAYLIST_PREV_BUTTON = 1023;
+constexpr int IDC_PLAYLIST_NEXT_BUTTON = 1024;
 
 constexpr int IDM_FILE_OPEN = 2001;
 constexpr int IDM_FILE_EXIT = 2002;
@@ -228,6 +232,7 @@ constexpr int IDC_OPT_TASKBAR_BUTTONS = 3013;
 constexpr int IDC_OPT_SCREENSHOT_FOLDER = 3014;
 constexpr int IDC_OPT_SCREENSHOT_BROWSE = 3015;
 constexpr int IDC_OPT_SHOW_STOP_BUTTON = 3016;
+constexpr int IDC_OPT_SHOW_PLAYLIST_BUTTONS = 3017;
 
 constexpr int IDC_SHORTCUT_PRIMARY_BASE = 4000;
 constexpr int IDC_SHORTCUT_ALT_BASE = 4100;
@@ -252,6 +257,8 @@ HWND g_speedDown = nullptr;
 HWND g_speedUp = nullptr;
 HWND g_autoNext = nullptr;
 HWND g_loopCurrent = nullptr;
+HWND g_playlistPrevButton = nullptr;
+HWND g_playlistNextButton = nullptr;
 HWND g_playlistOsd = nullptr;
 HWND g_playlistMenu = nullptr;
 HWND g_audio = nullptr;
@@ -292,7 +299,7 @@ bool g_taskbarButtonAdded = false;
 bool g_taskbarStateKnown = false;
 bool g_taskbarLastIdle = true;
 bool g_taskbarLastPaused = true;
-bool g_taskbarLastFullControls = false;
+bool g_taskbarLastPlaylistControls = false;
 bool g_taskbarLastShowStopButton = false;
 
 enum class OsdPosition {
@@ -435,8 +442,9 @@ GpuApi g_gpuApi = GpuApi::Auto;
 InstanceOpenBehavior g_instanceOpenBehavior = InstanceOpenBehavior::OpenInExisting;
 bool g_exitFullscreenOnPlaybackEnd = true;
 bool g_hideWindowedCursor = true;
-bool g_taskbarFullControls = false;
+bool g_taskbarPlaylistControls = false;
 bool g_showStopButton = false;
+bool g_showPlaylistButtons = false;
 bool g_loopCurrentFile = false;
 // Empty means the normal Pictures\MPV WinterStatic Edition location.
 std::wstring g_screenshotDirectory;
@@ -470,6 +478,8 @@ int64_t g_lastLoadedPlaylistPos = -1;
 RECT g_savedWindowRect{};
 
 bool g_fullscreen = false;
+bool g_suppressFullscreenSizeLayout = false;
+bool g_finalFullscreenRedrawPending = false;
 bool g_controlsVisible = true;
 bool g_pendingSingleClick = false;
 bool g_singleClickApplied = false;
@@ -497,6 +507,8 @@ bool g_fullscreenCursorHidden = false;
 bool g_windowedCursorHidden = false;
 bool g_cursorOverVideo = false;
 bool g_trackingVideoMouseLeave = false;
+POINT g_windowedVideoMouseAnchor{};
+bool g_haveWindowedVideoMouseAnchor = false;
 DWORD g_windowedStyle = 0;
 DWORD g_windowedExStyle = 0;
 RECT g_windowedRect{};
@@ -1239,10 +1251,15 @@ void LoadSettings() {
         ReadSettingInt(L"General", L"ExitFullscreenAtEnd", 1) != 0;
     g_hideWindowedCursor =
         ReadSettingInt(L"General", L"HideWindowedCursor", 1) != 0;
-    g_taskbarFullControls =
-        ReadSettingInt(L"General", L"TaskbarFullControls", 0) != 0;
+    // 0.4.10 deliberately uses a new key because the old Full controls
+    // setting meant +/-5 second seek buttons. Do not silently turn an
+    // existing seek preference into previous/next playlist actions.
+    g_taskbarPlaylistControls =
+        ReadSettingInt(L"General", L"TaskbarPlaylistControls", 0) != 0;
     g_showStopButton =
         ReadSettingInt(L"General", L"ShowStopButton", 0) != 0;
+    g_showPlaylistButtons =
+        ReadSettingInt(L"General", L"ShowPlaylistButtons", 0) != 0;
     g_screenshotDirectory =
         ReadSettingString(L"Screenshots", L"SaveFolder", L"");
     const int instanceBehavior =
@@ -1322,10 +1339,12 @@ void SaveSettings() {
                     g_exitFullscreenOnPlaybackEnd ? 1 : 0);
     WriteSettingInt(L"General", L"HideWindowedCursor",
                     g_hideWindowedCursor ? 1 : 0);
-    WriteSettingInt(L"General", L"TaskbarFullControls",
-                    g_taskbarFullControls ? 1 : 0);
+    WriteSettingInt(L"General", L"TaskbarPlaylistControls",
+                    g_taskbarPlaylistControls ? 1 : 0);
     WriteSettingInt(L"General", L"ShowStopButton",
                     g_showStopButton ? 1 : 0);
+    WriteSettingInt(L"General", L"ShowPlaylistButtons",
+                    g_showPlaylistButtons ? 1 : 0);
     WriteSettingString(L"Screenshots", L"SaveFolder", g_screenshotDirectory);
     WriteSettingInt(L"General", L"InstanceOpenBehavior",
                     static_cast<int>(g_instanceOpenBehavior));
@@ -2350,7 +2369,6 @@ void BuildTaskbarButtons(std::array<THUMBBUTTON, kTaskbarButtonCount>& buttons,
                          bool idle, bool paused) {
     EnsureTaskbarGlyphIcons();
 
-    const bool hideExtra = !g_taskbarFullControls;
     const THUMBBUTTONFLAGS mediaFlags = idle ? THBF_DISABLED : THBF_ENABLED;
     const THUMBBUTTONFLAGS playFlags =
         (!idle || (g_userStoppedPlayback && !g_currentMediaPath.empty()))
@@ -2368,23 +2386,21 @@ void BuildTaskbarButtons(std::array<THUMBBUTTON, kTaskbarButtonCount>& buttons,
     };
 
     setButton(buttons[0], kTaskbarPreviousButtonId, g_taskbarPreviousIcon,
-              L"Seek back 5 seconds",
-              hideExtra ? THBF_HIDDEN : mediaFlags);
+              L"Previous item",
+              g_taskbarPlaylistControls ? mediaFlags : THBF_HIDDEN);
     setButton(buttons[1], kTaskbarStopButtonId, g_taskbarStopIcon,
               L"Stop",
-              (hideExtra || !g_showStopButton) ? THBF_HIDDEN : mediaFlags);
+              g_showStopButton ? mediaFlags : THBF_HIDDEN);
     setButton(buttons[2], kTaskbarPlayPauseButtonId,
               (!idle && !paused) ? g_taskbarPauseIcon : g_taskbarPlayIcon,
               (!idle && !paused) ? L"Pause" : L"Play",
               playFlags);
     setButton(buttons[3], kTaskbarNextButtonId, g_taskbarNextIcon,
-              L"Seek forward 5 seconds",
-              hideExtra ? THBF_HIDDEN : mediaFlags);
-    const THUMBBUTTONFLAGS fullscreenFlags = hideExtra
-        ? THBF_HIDDEN
-        : static_cast<THUMBBUTTONFLAGS>(mediaFlags | THBF_DISMISSONCLICK);
+              L"Next item",
+              g_taskbarPlaylistControls ? mediaFlags : THBF_HIDDEN);
     setButton(buttons[4], kTaskbarFullscreenButtonId, g_taskbarFullscreenIcon,
-              L"Fullscreen", fullscreenFlags);
+              L"Fullscreen",
+              static_cast<THUMBBUTTONFLAGS>(mediaFlags | THBF_DISMISSONCLICK));
 }
 
 void UpdateTaskbarButtons(bool idle, bool paused, bool force = false) {
@@ -2392,7 +2408,7 @@ void UpdateTaskbarButtons(bool idle, bool paused, bool force = false) {
     if (!force && g_taskbarStateKnown &&
         g_taskbarLastIdle == idle &&
         g_taskbarLastPaused == paused &&
-        g_taskbarLastFullControls == g_taskbarFullControls &&
+        g_taskbarLastPlaylistControls == g_taskbarPlaylistControls &&
         g_taskbarLastShowStopButton == g_showStopButton) {
         return;
     }
@@ -2404,7 +2420,7 @@ void UpdateTaskbarButtons(bool idle, bool paused, bool force = false) {
             g_main, static_cast<UINT>(buttons.size()), buttons.data()))) {
         g_taskbarLastIdle = idle;
         g_taskbarLastPaused = paused;
-        g_taskbarLastFullControls = g_taskbarFullControls;
+        g_taskbarLastPlaylistControls = g_taskbarPlaylistControls;
         g_taskbarLastShowStopButton = g_showStopButton;
         g_taskbarStateKnown = true;
     }
@@ -2433,15 +2449,16 @@ void InitializeTaskbarButton() {
     std::array<THUMBBUTTON, kTaskbarButtonCount> buttons{};
     BuildTaskbarButtons(buttons, idle, paused);
 
-    // Register all five slots once. In the default compact layout the four
-    // optional controls are THBF_HIDDEN. This lets Options reveal/hide them
-    // later with ThumbBarUpdateButtons without re-registering the thumbbar.
+    // Register all five slots once. The default Simple layout shows Play/Pause
+    // and Fullscreen while Previous/Stop/Next are hidden as appropriate. This
+    // lets Options switch layouts later with ThumbBarUpdateButtons without
+    // re-registering the thumbbar.
     if (SUCCEEDED(g_taskbarList->ThumbBarAddButtons(
             g_main, static_cast<UINT>(buttons.size()), buttons.data()))) {
         g_taskbarButtonAdded = true;
         g_taskbarLastIdle = idle;
         g_taskbarLastPaused = paused;
-        g_taskbarLastFullControls = g_taskbarFullControls;
+        g_taskbarLastPlaylistControls = g_taskbarPlaylistControls;
         g_taskbarLastShowStopButton = g_showStopButton;
         g_taskbarStateKnown = true;
     }
@@ -3932,7 +3949,20 @@ void LayoutChildren(HWND hwnd) {
     MoveWindow(g_playlistMenu, x, y, 22, h, TRUE);
     x += 26;
 
+    // Optional previous/next playlist-item controls sit beside PLAYLIST because
+    // they act on that same item sequence. They are Off by default.
+    ShowWindow(g_playlistPrevButton, g_showPlaylistButtons ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_playlistNextButton, g_showPlaylistButtons ? SW_SHOW : SW_HIDE);
+    if (g_showPlaylistButtons) {
+        constexpr int itemButtonW = 42;
+        MoveWindow(g_playlistPrevButton, x, y, itemButtonW, h, TRUE);
+        x += itemButtonW + 4;
+        MoveWindow(g_playlistNextButton, x, y, itemButtonW, h, TRUE);
+        x += itemButtonW + 8;
+    }
+
     int right = pw - 7;
+
     const int timeW = 112;
     right -= timeW;
     MoveWindow(g_time, right, y + 4, timeW, 18, TRUE);
@@ -3983,9 +4013,10 @@ void LayoutChildren(HWND hwnd) {
     constexpr int gap = 4;
     const int fixedW = trackButtonW * 2 + gap * 4;
 
-    // At narrow widths the optional Stop button consumes another 30 px on the
-    // left. Never let the middle information group run underneath the mute /
-    // volume / time controls. If even the two track buttons cannot fit, keep
+    // At narrow widths the optional Stop and PREV/NEXT controls consume more
+    // space on the left. Never let the middle information group run underneath
+    // those controls.
+    // If even the two track buttons cannot fit, keep
     // only the playback-status field; the same track actions remain available
     // from the menus and keyboard shortcuts.
     if (middleAvailable < fixedW) {
@@ -4035,9 +4066,40 @@ void SetWindowedCursorHidden(bool hidden) {
     SetCursor(hidden ? nullptr : LoadCursorW(nullptr, IDC_ARROW));
 }
 
+bool WindowedVideoMouseMovedEnough() {
+    POINT cursor{};
+    if (!GetCursorPos(&cursor)) {
+        // Fail visible if Windows cannot provide a pointer position.
+        g_haveWindowedVideoMouseAnchor = false;
+        return true;
+    }
+
+    if (!g_haveWindowedVideoMouseAnchor) {
+        g_windowedVideoMouseAnchor = cursor;
+        g_haveWindowedVideoMouseAnchor = true;
+        return true;
+    }
+
+    const LONGLONG dx = static_cast<LONGLONG>(cursor.x) - g_windowedVideoMouseAnchor.x;
+    const LONGLONG dy = static_cast<LONGLONG>(cursor.y) - g_windowedVideoMouseAnchor.y;
+    const LONGLONG threshold = kWindowedCursorWakeDistancePx;
+    if (dx * dx + dy * dy < threshold * threshold) return false;
+
+    g_windowedVideoMouseAnchor = cursor;
+    return true;
+}
+
 void NoteWindowedVideoMouseActivity() {
     if (g_fullscreen) return;
+
+    const bool wasOverVideo = g_cursorOverVideo;
     g_cursorOverVideo = true;
+
+    // Entering the video counts as activity. While already over it, ignore
+    // repeated same-position WM_MOUSEMOVE messages and tiny pointer jitter.
+    if (!wasOverVideo) g_haveWindowedVideoMouseAnchor = false;
+    if (!WindowedVideoMouseMovedEnough()) return;
+
     g_lastWindowedVideoMouseActivity = GetTickCount64();
     SetWindowedCursorHidden(false);
 }
@@ -4072,62 +4134,179 @@ void NoteFullscreenMouseActivity() {
     SetFullscreenCursorHidden(false);
 }
 
+class ScopedWindowRedrawSuppression {
+public:
+    explicit ScopedWindowRedrawSuppression(HWND hwnd) : hwnd_(hwnd) {
+        if (hwnd_) SendMessageW(hwnd_, WM_SETREDRAW, FALSE, 0);
+    }
+
+    ~ScopedWindowRedrawSuppression() {
+        if (!hwnd_) return;
+        SendMessageW(hwnd_, WM_SETREDRAW, TRUE, 0);
+
+        // Invalidate the completed hierarchy normally so Windows can coalesce
+        // child paints with the rest of the message loop. Then request one
+        // deferred top-level finish on the next message-loop turn instead of
+        // forcing paint synchronously inside the fullscreen transition.
+        RedrawWindow(hwnd_, nullptr, nullptr,
+                     RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
+
+        if (!g_finalFullscreenRedrawPending &&
+            PostMessageW(hwnd_, WM_APP_FINAL_FULLSCREEN_REDRAW, 0, 0)) {
+            g_finalFullscreenRedrawPending = true;
+        }
+    }
+
+    ScopedWindowRedrawSuppression(const ScopedWindowRedrawSuppression&) = delete;
+    ScopedWindowRedrawSuppression& operator=(const ScopedWindowRedrawSuppression&) = delete;
+
+private:
+    HWND hwnd_ = nullptr;
+};
+
+class ScopedFullscreenSizeLayoutSuppression {
+public:
+    ScopedFullscreenSizeLayoutSuppression()
+        : previous_(g_suppressFullscreenSizeLayout) {
+        g_suppressFullscreenSizeLayout = true;
+    }
+
+    ~ScopedFullscreenSizeLayoutSuppression() {
+        g_suppressFullscreenSizeLayout = previous_;
+    }
+
+    ScopedFullscreenSizeLayoutSuppression(const ScopedFullscreenSizeLayoutSuppression&) = delete;
+    ScopedFullscreenSizeLayoutSuppression& operator=(const ScopedFullscreenSizeLayoutSuppression&) = delete;
+
+private:
+    bool previous_ = false;
+};
+
+void RefreshFullscreenMonitorBounds(HWND hwnd) {
+    if (!g_fullscreen || !hwnd) return;
+
+    const HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{ sizeof(mi) };
+    if (!monitor || !GetMonitorInfoW(monitor, &mi)) return;
+
+    RECT current{};
+    if (GetWindowRect(hwnd, &current) && EqualRect(&current, &mi.rcMonitor)) {
+        return;
+    }
+
+    ScopedWindowRedrawSuppression redraw(hwnd);
+    ScopedFullscreenSizeLayoutSuppression sizeLayout;
+
+    if (!SetWindowPos(hwnd, nullptr,
+                      mi.rcMonitor.left, mi.rcMonitor.top,
+                      mi.rcMonitor.right - mi.rcMonitor.left,
+                      mi.rcMonitor.bottom - mi.rcMonitor.top,
+                      SWP_NOACTIVATE | SWP_NOCOPYBITS |
+                      SWP_NOZORDER | SWP_NOOWNERZORDER)) {
+        return;
+    }
+
+    LayoutChildren(hwnd);
+    if (g_playlistOsdVisible) RenderPlaylistOverlay();
+}
+
 void EnterFullscreen() {
     if (g_fullscreen) return;
+
+    // Preflight all state needed for a safe round-trip before changing either
+    // the logical fullscreen state or the visible window hierarchy.
+    const DWORD windowedStyle = static_cast<DWORD>(GetWindowLongPtrW(g_main, GWL_STYLE));
+    const DWORD windowedExStyle = static_cast<DWORD>(GetWindowLongPtrW(g_main, GWL_EXSTYLE));
+    RECT windowedRect{};
+    WINDOWPLACEMENT windowedPlacement{ sizeof(WINDOWPLACEMENT) };
+    MONITORINFO mi{ sizeof(mi) };
+    const HMONITOR monitor = MonitorFromWindow(g_main, MONITOR_DEFAULTTONEAREST);
+
+    if (!GetWindowRect(g_main, &windowedRect) ||
+        !GetWindowPlacement(g_main, &windowedPlacement) ||
+        !monitor || !GetMonitorInfoW(monitor, &mi)) {
+        return;
+    }
+
+    g_windowedStyle = windowedStyle;
+    g_windowedExStyle = windowedExStyle;
+    g_windowedRect = windowedRect;
+    g_windowedPlacement = windowedPlacement;
+
     g_cursorOverVideo = false;
     g_trackingVideoMouseLeave = false;
+    g_haveWindowedVideoMouseAnchor = false;
     SetWindowedCursorHidden(false);
-    g_windowedStyle = static_cast<DWORD>(GetWindowLongPtrW(g_main, GWL_STYLE));
-    g_windowedExStyle = static_cast<DWORD>(GetWindowLongPtrW(g_main, GWL_EXSTYLE));
-    GetWindowRect(g_main, &g_windowedRect);
-    g_windowedPlacement = WINDOWPLACEMENT{ sizeof(WINDOWPLACEMENT) };
-    GetWindowPlacement(g_main, &g_windowedPlacement);
 
-    MONITORINFO mi{ sizeof(mi) };
-    GetMonitorInfoW(MonitorFromWindow(g_main, MONITOR_DEFAULTTONEAREST), &mi);
-    g_fullscreen = true;
-    ShowWindow(g_menuBar, SW_HIDE);
-    SetWindowLongPtrW(g_main, GWL_STYLE, (g_windowedStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
-    SetWindowLongPtrW(g_main, GWL_EXSTYLE, g_windowedExStyle & ~WS_EX_CLIENTEDGE);
-    SetWindowPos(g_main, HWND_TOP,
-                 mi.rcMonitor.left, mi.rcMonitor.top,
-                 mi.rcMonitor.right - mi.rcMonitor.left,
-                 mi.rcMonitor.bottom - mi.rcMonitor.top,
-                 SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-    g_controlsVisible = false;
-    ShowWindow(g_panel, SW_HIDE);
+    {
+        // The scope guard guarantees WM_SETREDRAW is restored and the final
+        // frame is invalidated even if this transition later gains an early exit.
+        ScopedWindowRedrawSuppression redraw(g_main);
+        ScopedFullscreenSizeLayoutSuppression sizeLayout;
+
+        g_fullscreen = true;
+        g_controlsVisible = false;
+
+        SetWindowLongPtrW(g_main, GWL_STYLE,
+                          (g_windowedStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_VISIBLE);
+        SetWindowLongPtrW(g_main, GWL_EXSTYLE, g_windowedExStyle & ~WS_EX_CLIENTEDGE);
+        SetWindowPos(g_main, HWND_TOP,
+                     mi.rcMonitor.left, mi.rcMonitor.top,
+                     mi.rcMonitor.right - mi.rcMonitor.left,
+                     mi.rcMonitor.bottom - mi.rcMonitor.top,
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW |
+                     SWP_NOACTIVATE | SWP_NOCOPYBITS);
+
+        ShowWindow(g_panel, SW_HIDE);
+        LayoutChildren(g_main);
+        if (g_playlistOsdVisible) RenderPlaylistOverlay();
+    }
+
     g_lastFullscreenMouseActivity = GetTickCount64();
     SetFullscreenCursorHidden(false);
     SetTimer(g_main, TIMER_FULLSCREEN_HOVER, 100, nullptr);
-    LayoutChildren(g_main);
 }
 
 void ExitFullscreen() {
     if (!g_fullscreen) return;
     KillTimer(g_main, TIMER_FULLSCREEN_HOVER);
     SetFullscreenCursorHidden(false);
-    g_fullscreen = false;
-    SetWindowLongPtrW(g_main, GWL_STYLE, g_windowedStyle);
-    SetWindowLongPtrW(g_main, GWL_EXSTYLE, g_windowedExStyle);
-    ShowWindow(g_menuBar, SW_SHOW);
 
-    if (g_windowedPlacement.length == sizeof(WINDOWPLACEMENT)) {
-        SetWindowPlacement(g_main, &g_windowedPlacement);
-        SetWindowPos(g_main, nullptr, 0, 0, 0, 0,
-                     SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
-                     SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
-    } else {
-        SetWindowPos(g_main, nullptr,
-                     g_windowedRect.left, g_windowedRect.top,
-                     g_windowedRect.right - g_windowedRect.left,
-                     g_windowedRect.bottom - g_windowedRect.top,
-                     SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+    {
+        // Keep the logical fullscreen layout active until the saved top-level
+        // state is restored. The guard cannot leave redraw disabled on scope exit.
+        ScopedWindowRedrawSuppression redraw(g_main);
+        ScopedFullscreenSizeLayoutSuppression sizeLayout;
+
+        SetWindowLongPtrW(g_main, GWL_STYLE, g_windowedStyle);
+        SetWindowLongPtrW(g_main, GWL_EXSTYLE, g_windowedExStyle);
+
+        bool placementRestored = false;
+        if (g_windowedPlacement.length == sizeof(WINDOWPLACEMENT)) {
+            placementRestored = SetWindowPlacement(g_main, &g_windowedPlacement) != FALSE;
+            if (placementRestored) {
+                SetWindowPos(g_main, nullptr, 0, 0, 0, 0,
+                             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
+                             SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+            }
+        }
+
+        if (!placementRestored) {
+            SetWindowPos(g_main, nullptr,
+                         g_windowedRect.left, g_windowedRect.top,
+                         g_windowedRect.right - g_windowedRect.left,
+                         g_windowedRect.bottom - g_windowedRect.top,
+                         SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+        }
+
+        g_fullscreen = false;
+        LayoutChildren(g_main);
+        if (g_playlistOsdVisible) RenderPlaylistOverlay();
     }
-    g_controlsVisible = true;
-    ShowWindow(g_panel, SW_SHOW);
+
+    g_haveWindowedVideoMouseAnchor = false;
     g_lastWindowedVideoMouseActivity = GetTickCount64();
     SetWindowedCursorHidden(false);
-    LayoutChildren(g_main);
 }
 
 void ToggleFullscreen() {
@@ -4768,7 +4947,9 @@ void DrawButtonGlyph(HDC dc, int id, const RECT& r) {
         id == IDC_AUDIO ? L"AUD" :
         (id == IDC_SUBS ? L"SUB" :
         (id == IDC_AUTO_NEXT ? L"AUTO" :
-        (id == IDC_PLAYLIST_OSD ? L"PLAYLIST" : L"")));
+        (id == IDC_PLAYLIST_OSD ? L"PLAYLIST" :
+        (id == IDC_PLAYLIST_PREV_BUTTON ? L"PREV" :
+        (id == IDC_PLAYLIST_NEXT_BUTTON ? L"NEXT" : L"")))));
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc,
                  id == IDC_AUTO_NEXT && !g_autoPlayNextFile
@@ -5185,6 +5366,7 @@ LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (!g_fullscreen) {
             g_trackingVideoMouseLeave = false;
             g_cursorOverVideo = false;
+            g_haveWindowedVideoMouseAnchor = false;
             SetWindowedCursorHidden(false);
         }
         return 0;
@@ -5235,6 +5417,8 @@ void CreateUi(HWND hwnd) {
     g_speedUp = CreateButton(g_panel, IDC_SPEED_UP);
     g_autoNext = CreateButton(g_panel, IDC_AUTO_NEXT);
     g_loopCurrent = CreateButton(g_panel, IDC_LOOP_CURRENT);
+    g_playlistPrevButton = CreateButton(g_panel, IDC_PLAYLIST_PREV_BUTTON);
+    g_playlistNextButton = CreateButton(g_panel, IDC_PLAYLIST_NEXT_BUTTON);
     g_playlistOsd = CreateButton(g_panel, IDC_PLAYLIST_OSD);
     g_playlistMenu = CreateButton(g_panel, IDC_PLAYLIST_MENU);
     g_audio = CreateButton(g_panel, IDC_AUDIO);
@@ -5742,7 +5926,8 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
             IDC_OPT_GPU_API, IDC_OPT_SUB_SIZE, IDC_OPT_AUDIO_LANG, IDC_OPT_SUB_LANG,
             IDC_OPT_EXIT_FULLSCREEN_END, IDC_OPT_INSTANCE_BEHAVIOR,
             IDC_OPT_HIDE_WINDOWED_CURSOR, IDC_OPT_TASKBAR_BUTTONS,
-            IDC_OPT_SHOW_STOP_BUTTON, IDC_OPT_SCREENSHOT_FOLDER, IDC_OPT_SCREENSHOT_BROWSE,
+            IDC_OPT_SHOW_STOP_BUTTON, IDC_OPT_SHOW_PLAYLIST_BUTTONS,
+            IDC_OPT_SCREENSHOT_FOLDER, IDC_OPT_SCREENSHOT_BROWSE,
             IDC_OPT_SHORTCUTS, IDOK, IDCANCEL
         };
         for (int id : ids) {
@@ -5800,6 +5985,8 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
                        g_hideWindowedCursor ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog, IDC_OPT_SHOW_STOP_BUTTON,
                        g_showStopButton ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog, IDC_OPT_SHOW_PLAYLIST_BUTTONS,
+                       g_showPlaylistButtons ? BST_CHECKED : BST_UNCHECKED);
 
         HWND instanceCombo = GetDlgItem(dialog, IDC_OPT_INSTANCE_BEHAVIOR);
         SendMessageW(instanceCombo, CB_ADDSTRING, 0,
@@ -5815,13 +6002,14 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
 
         HWND taskbarCombo = GetDlgItem(dialog, IDC_OPT_TASKBAR_BUTTONS);
         SendMessageW(taskbarCombo, CB_ADDSTRING, 0,
-                     reinterpret_cast<LPARAM>(L"Play/Pause only"));
+                     reinterpret_cast<LPARAM>(L"Play/Pause + Fullscreen"));
         SendMessageW(taskbarCombo, CB_ADDSTRING, 0,
-                     reinterpret_cast<LPARAM>(L"Full controls"));
+                     reinterpret_cast<LPARAM>(L"Playlist Previous/Next"));
         SendMessageW(taskbarCombo, CB_SETCURSEL,
-                     g_taskbarFullControls ? 1 : 0, 0);
+                     g_taskbarPlaylistControls ? 1 : 0, 0);
         SendMessageW(taskbarCombo, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1), 20);
         SendMessageW(taskbarCombo, CB_SETITEMHEIGHT, 0, 20);
+        SendMessageW(taskbarCombo, CB_SETDROPPEDWIDTH, 190, 0);
 
         SetDlgItemTextW(dialog, IDC_OPT_SCREENSHOT_FOLDER,
                         ScreenshotDirectory().wstring().c_str());
@@ -5993,6 +6181,8 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
                 IsDlgButtonChecked(dialog, IDC_OPT_HIDE_WINDOWED_CURSOR) == BST_CHECKED;
             g_showStopButton =
                 IsDlgButtonChecked(dialog, IDC_OPT_SHOW_STOP_BUTTON) == BST_CHECKED;
+            g_showPlaylistButtons =
+                IsDlgButtonChecked(dialog, IDC_OPT_SHOW_PLAYLIST_BUTTONS) == BST_CHECKED;
 
             HWND instanceCombo = GetDlgItem(dialog, IDC_OPT_INSTANCE_BEHAVIOR);
             const int instanceSel = static_cast<int>(
@@ -6003,7 +6193,7 @@ INT_PTR CALLBACK OptionsProc(HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam
             HWND taskbarCombo = GetDlgItem(dialog, IDC_OPT_TASKBAR_BUTTONS);
             const int taskbarSel = static_cast<int>(
                 SendMessageW(taskbarCombo, CB_GETCURSEL, 0, 0));
-            g_taskbarFullControls = taskbarSel == 1;
+            g_taskbarPlaylistControls = taskbarSel == 1;
 
             wchar_t screenshotFolder[32768]{};
             GetDlgItemTextW(dialog, IDC_OPT_SCREENSHOT_FOLDER, screenshotFolder,
@@ -6154,8 +6344,10 @@ void HandleCommand(int id) {
         TogglePlaylistOsd(); break;
     case IDC_PLAYLIST_MENU:
         ShowPlaylistPopup(g_playlistMenu); break;
+    case IDC_PLAYLIST_PREV_BUTTON:
     case IDM_PLAYLIST_PREV:
         PlaylistStep(false); break;
+    case IDC_PLAYLIST_NEXT_BUTTON:
     case IDM_PLAYLIST_NEXT:
         PlaylistStep(true); break;
     case IDC_AUDIO:
@@ -6178,8 +6370,8 @@ void HandleCommand(int id) {
                             OptionsProc, 0) == IDOK) {
             // OptionsProc applies settings while the modal dialog is still active.
             // Run one final layout after it has actually closed so controls that
-            // appear/disappear (notably the optional Stop button) cannot leave
-            // PLAYLIST / SUB / AUD using an intermediate geometry.
+            // appear/disappear (notably optional Stop and PREV/NEXT buttons)
+            // cannot leave PLAYLIST / SUB / AUD using an intermediate geometry.
             LayoutChildren(g_main);
             if (g_panel) {
                 RedrawWindow(g_panel, nullptr, nullptr,
@@ -6213,8 +6405,13 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         DragAcceptFiles(hwnd, TRUE);
         return 0;
     case WM_SIZE:
-        LayoutChildren(hwnd);
-        if (g_playlistOsdVisible) RenderPlaylistOverlay();
+        if (!g_suppressFullscreenSizeLayout) {
+            LayoutChildren(hwnd);
+            if (g_playlistOsdVisible) RenderPlaylistOverlay();
+        }
+        return 0;
+    case WM_DISPLAYCHANGE:
+        if (g_fullscreen) RefreshFullscreenMonitorBounds(hwnd);
         return 0;
     case WM_GETMINMAXINFO: {
         auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
@@ -6267,18 +6464,22 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (HIWORD(wParam) == THBN_CLICKED) {
             switch (LOWORD(wParam)) {
             case kTaskbarPreviousButtonId:
-                SeekBy(-kSeekStepSeconds); return 0;
+                PlaylistStep(false); return 0;
             case kTaskbarStopButtonId:
                 StopPlayback(); return 0;
             case kTaskbarPlayPauseButtonId:
                 TogglePlay(); return 0;
             case kTaskbarNextButtonId:
-                SeekBy(kSeekStepSeconds); return 0;
+                PlaylistStep(true); return 0;
             case kTaskbarFullscreenButtonId:
                 ToggleFullscreenFromTaskbar(); return 0;
             }
         }
         HandleCommand(LOWORD(wParam));
+        return 0;
+    case WM_APP_FINAL_FULLSCREEN_REDRAW:
+        g_finalFullscreenRedrawPending = false;
+        RedrawWindow(hwnd, nullptr, nullptr, RDW_UPDATENOW | RDW_NOCHILDREN);
         return 0;
     case WM_APP_AUTO_NEXT_FILE:
         PlayPendingAutoNextFile();

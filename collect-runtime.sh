@@ -185,7 +185,7 @@ manifest="$DIST/RUNTIME-MANIFEST.txt"
     echo
     echo "This manifest records binary provenance. RUNTIME-PACKAGES.tsv contains"
     echo "the machine-readable package/version/source-base mapping used by the"
-    echo "0.4.7 release-source collector."
+    echo "0.4.10 release-source collector."
 } > "$manifest"
 
 echo "  + RUNTIME-MANIFEST.txt"
@@ -308,18 +308,24 @@ if (( ${#package_versions[@]} > 0 )); then
         done
         shopt -u globstar
 
+        local_db_resolved=0
         if (( found_for_package == 0 )); then
             # Reading /var/lib/pacman/local avoids starting a separate pacman
-            # process for each package. The local database is the same installed
-            # package inventory pacman -Ql would consult.
-            while IFS= read -r license_path; do
-                [[ -f "$license_path" ]] || continue
-                copy_license_file "$package" "$license_path"
-                found_for_package=$((found_for_package + 1))
-            done < <(local_db_license_files "$package" || true)
+            # process for each package. A successful database lookup is
+            # conclusive even when the package has no share/licenses files.
+            # Only a database lookup failure should fall back to pacman -Ql.
+            local_db_output=""
+            if local_db_output="$(local_db_license_files "$package")"; then
+                local_db_resolved=1
+                while IFS= read -r license_path; do
+                    [[ -n "$license_path" && -f "$license_path" ]] || continue
+                    copy_license_file "$package" "$license_path"
+                    found_for_package=$((found_for_package + 1))
+                done <<< "$local_db_output"
+            fi
         fi
 
-        if (( found_for_package == 0 )); then
+        if (( found_for_package == 0 && local_db_resolved == 0 )); then
             pacman_fallback_packages+=("$package")
         fi
     done

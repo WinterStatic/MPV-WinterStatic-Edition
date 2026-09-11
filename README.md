@@ -1,5 +1,5 @@
 MPV WinterStatic Edition
-Version 0.4.7
+Version 0.4.10
 ============================
 
 MPV WinterStatic Edition is a lightweight native Win32 frontend for libmpv.
@@ -75,7 +75,7 @@ Run:
 
 When successful, the build creates:
 
-    MPV-WinterStatic-Edition-0.4.7-portable
+    MPV-WinterStatic-Edition-0.4.10-portable
 
 If that folder already exists and cannot be replaced, the build script may add
 a numeric suffix.
@@ -101,8 +101,8 @@ exact installed version.
 
 A successful release-mode build additionally creates:
 
-    MPV-WinterStatic-Edition-0.4.7-runtime-source\
-    MPV-WinterStatic-Edition-0.4.7-Runtime-Source.zip
+    MPV-WinterStatic-Edition-0.4.10-runtime-source\
+    MPV-WinterStatic-Edition-0.4.10-Runtime-Source.zip
 
 The source bundle contains:
 
@@ -172,12 +172,13 @@ Settings include:
 - exit-fullscreen-at-final-end preference
 - behavior when another file is opened while the player is already running
 - windowed-video cursor auto-hide
-- taskbar thumbnail button layout (Play/Pause only / Full controls)
+- taskbar thumbnail button layout (Play/Pause + Fullscreen / Playlist Previous/Next)
 - screenshot save folder
 - volume
 - mute state
 - custom keyboard shortcuts
 - Show Stop button on toolbars (off by default)
+- Show PREV/NEXT playlist-item buttons on the bottom toolbar (off by default)
 
 Fresh-install defaults include:
 
@@ -190,8 +191,9 @@ Fresh-install defaults include:
 - Exit fullscreen when playback ends: enabled
 - opening another file: use the existing instance
 - Hide cursor over playing video after inactivity: enabled
-- Taskbar thumbnail buttons: Play/Pause only
+- Taskbar thumbnail buttons: Play/Pause + Fullscreen
 - Show Stop button on toolbars: Off
+- Show PREV/NEXT item buttons on toolbar: Off
 - Screenshot save folder: Pictures\MPV WinterStatic Edition\
 - LOOP current file: Off (session-only; not saved)
 - volume: 70%
@@ -228,9 +230,9 @@ Default keyboard / mouse bindings:
 - Double-click video: Fullscreen
 - Fullscreen: mouse cursor hides after a short idle period over the video
 - Seek bar: click seeks on release; dragging seeks live while playback continues
-- Windows taskbar thumbnail preview: Play/Pause by default; Options can enable
-  Seek back 5 seconds / Play-Pause / Seek forward 5 seconds / Fullscreen. Stop
-  joins the full layout only when Show Stop button on toolbars is enabled.
+- Windows taskbar thumbnail preview: Play/Pause + Fullscreen by default. Options
+  can switch the side slots to Previous item / Next item for playlist or music
+  use. Stop remains optional through Show Stop button on toolbars.
 
 Keyboard shortcuts can be changed from:
 
@@ -276,6 +278,7 @@ Bottom controls:
 - Audio track menu
 - Mute
 - Volume
+- PREV / NEXT playlist-item buttons (optional; hidden by default beside PLAYLIST)
 
 INSTANCE HANDLING
 -----------------
@@ -395,7 +398,7 @@ Executable:
 
 The About dialog identifies this build as:
 
-    Version 0.4.7
+    Version 0.4.10
 
 The About dialog also credits:
 
@@ -428,6 +431,93 @@ compliance work.
 
 VERSION HISTORY
 ---------------
+
+0.4.10 TASKBAR MODES / OPTIONAL PLAYLIST BUTTONS
+------------------------------------------------------------------
+- Fixed runtime-license collection so a package whose local pacman database is
+  readable but contains no separate share/licenses files is treated as resolved.
+  Only genuine local-database lookup failures now enter the batched pacman -Ql
+  fallback, avoiding unnecessary long package-file enumeration during builds.
+- Moved the optional PREV/NEXT bottom-toolbar pair directly beside PLAYLIST so
+  playlist navigation stays grouped with the playlist controls instead of the
+  time / volume cluster.
+- Reworked the Windows taskbar thumbnail dropdown around two purposeful layouts
+  instead of the old seek-heavy Full controls mode. The default is now
+  Play/Pause + Fullscreen. The alternate Playlist Previous/Next mode adds
+  Previous item and Next item around Play/Pause while retaining Fullscreen.
+- Taskbar Previous/Next now use the existing playlist-item navigation path.
+  Explicit playlists keep priority; with one loaded file and AUTO enabled, the
+  same actions use the existing Explorer-style previous/next folder behavior.
+- Added an optional paired PREV/NEXT text control beside PLAYLIST on the bottom
+  toolbar. The pair is Off by default and uses the same playlist-item actions as
+  the menu and taskbar playlist mode.
+- The existing Show Stop button on toolbars option remains independent. Stop is
+  still hidden by default and can join either taskbar mode when explicitly enabled.
+- Changing the optional toolbar controls uses the same final post-Options layout
+  and repaint pass as the Stop-button toggle, preventing the middle status / SUB /
+  AUD group from being left with intermediate geometry.
+- The new taskbar mode uses a new TaskbarPlaylistControls setting instead of
+  reinterpreting the old TaskbarFullControls preference. Upgrades therefore fall
+  back safely to the new Simple layout rather than silently turning old seek
+  buttons into file-skip buttons.
+- Fullscreen, cursor filtering, playback, seek, AUTO, LOOP, screenshots, resume,
+  track memory, GPU selection, instance handling, and runtime packaging are
+  otherwise unchanged from 0.4.9.
+
+
+0.4.9 CURSOR WAKE FILTER / FULLSCREEN FINISH / TASKBAR DEFAULT
+---------------------------------------------------------------
+- Hardened the windowed playing-video cursor auto-hide path against duplicate
+  or stationary WM_MOUSEMOVE notifications by checking the actual screen
+  pointer position before treating a move message as real user activity.
+- Added a small 4-pixel cumulative wake threshold while the pointer remains over
+  the video. Tiny sensor jitter no longer immediately reveals the cursor, while
+  deliberate slow movement still accumulates and wakes it normally.
+- Cursor position comparisons use screen coordinates, reset on video mouse-leave
+  and fullscreen transitions, and fail visible if Windows cannot provide the
+  pointer position. Hide cursor over playing video remains enabled by default on
+  fresh installs.
+- Refined the fullscreen redraw finish without adding a fixed delay, Sleep call,
+  recurring timer, or background polling. After the completed hierarchy is
+  invalidated normally, one coalesced private window message performs a
+  parent-only final repaint on the next message-loop turn. Rapid fullscreen
+  toggling cannot queue a backlog of these finish messages.
+- Fresh installs now use the full Windows taskbar thumbnail control layout by
+  default: Seek back 5 seconds, Play/Pause, Seek forward 5 seconds, and
+  Fullscreen. The Stop button remains hidden by default and appears there only
+  when Show Stop button on toolbars is enabled. Existing saved preferences are
+  preserved.
+- Playback, seek, AUTO, LOOP, screenshots, resume, track memory, GPU selection,
+  instance handling, and runtime packaging are otherwise unchanged from 0.4.8.
+
+
+0.4.8 FULLSCREEN TRANSITION / DISPLAY RECOVERY
+--------------------------------------------------
+- Reworked native Win32 fullscreen entry and exit so top-level window geometry
+  and internal chrome changes are committed in a cleaner order, reducing the
+  old visibly staged vertical-then-horizontal transition.
+- Fullscreen transitions temporarily suppress intermediate redraws and restore
+  painting through a scope guard, so a future early exit cannot leave the main
+  window stuck with redraw disabled.
+- Fullscreen entry preflights the saved window rectangle, placement, and target
+  monitor before changing state. Exit retains a saved-rectangle fallback if
+  restoring WINDOWPLACEMENT fails.
+- The fullscreen monitor resize uses SWP_NOCOPYBITS so Windows does not preserve
+  stale client-area pixels during the resize, and SWP_NOACTIVATE so the geometry
+  change does not request an unnecessary activation transition.
+- During controlled fullscreen entry and exit, WM_SIZE no longer relays
+  intermediate top-level sizes into the embedded libmpv video and native
+  controls. Child layout is committed once after the final window geometry has
+  settled, including one final playlist-overlay refresh when visible.
+- Added WM_DISPLAYCHANGE recovery while fullscreen. If the active display
+  topology or resolution changes, the player re-resolves the nearest current
+  monitor and corrects fullscreen bounds only when required, using the same
+  redraw and child-layout guards. No polling or recurring playback work is
+  added.
+- Normal user-driven window resizing, playback, seek, AUTO, LOOP, Stop, taskbar,
+  screenshots, cursor behavior, resume, settings, and runtime packaging are
+  otherwise unchanged from 0.4.7.
+
 
 0.4.7 SEEK / FRAME STEP / SCREENSHOTS / PLAYBACK FIXES
 ----------------------------------------------------------
