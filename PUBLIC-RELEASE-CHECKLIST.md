@@ -12,25 +12,41 @@ Project repository: https://github.com/WinterStatic/MPV-WinterStatic-Edition
 
 ## Recommended Full Portable release build
 
-Run:
+For a public GitHub binary release intended to pass Windows 11 Smart App Control
+publisher checks, run:
 
 ```text
-build-native.bat release
+build-native.bat signed-release
 ```
 
-This performs the normal build and then creates a matching runtime-source bundle
+Use `build-native.bat release` only when intentionally producing an unsigned
+release/test package.
+
+Release mode performs the normal build and then creates a matching runtime-source bundle
 from the exact MSYS2 packages represented by the bundled DLLs. Source collection
 is deliberately not part of normal development builds because the official source
 archives can be large and require internet access.
 
-A successful 0.4.10 release-mode build should produce:
+A successful 0.4.11 release-mode build should produce:
 
-- `MPV-WinterStatic-Edition-0.4.10-portable/` (or a numeric-suffixed folder if the canonical folder was locked)
-- `MPV-WinterStatic-Edition-0.4.10-runtime-source/`
-- `MPV-WinterStatic-Edition-0.4.10-Runtime-Source.zip` when MSYS2 `bsdtar` is available
+- `MPV-WinterStatic-Edition-0.4.11-portable/` (or a numeric-suffixed folder if the canonical folder was locked)
+- `MPV-WinterStatic-Edition-0.4.11-runtime-source/`
+- `MPV-WinterStatic-Edition-0.4.11-Runtime-Source.zip` when MSYS2 `bsdtar` is available
 
 If release source collection fails, do not publish that Full Portable binary until
 the matching source bundle has been completed successfully.
+
+## Code signing / Smart App Control
+
+If publishing a signed build:
+
+- Use `build-native.bat signed-release`.
+- Configure the trusted RSA certificate through the git-ignored `signing.local.cmd`.
+- Do not commit a PFX/P12 file or certificate password.
+- Confirm SignTool completes the SHA-256 signature, RFC 3161 timestamp, and verification steps.
+- Confirm Windows Explorer shows a valid **Digital Signatures** tab on the frontend EXE.
+- Keep existing valid signatures on third-party runtime files; the build does this automatically.
+- Do not describe a self-signed/private certificate as Smart App Control compatible for public users.
 
 ## Bundled libmpv runtime
 
@@ -70,7 +86,7 @@ than trying to maintain a hand-written list of only copyleft dependencies.
 ## Suggested release assets
 
 1. **Full Portable** - frontend plus the tested `libmpv/` runtime.
-2. **Runtime Source** - the generated `MPV-WinterStatic-Edition-0.4.10-Runtime-Source.zip`.
+2. **Runtime Source** - the generated `MPV-WinterStatic-Edition-0.4.11-Runtime-Source.zip`.
 3. **Repository source** - GitHub's repository/tag source archive, containing the frontend and build scripts.
 4. **Frontend-only** (optional) - for advanced users who intentionally supply a compatible libmpv runtime.
 

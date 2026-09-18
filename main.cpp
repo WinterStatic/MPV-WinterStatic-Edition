@@ -105,7 +105,7 @@ constexpr wchar_t kVolumeClass[] = L"MPVMPCNativeVolume";
 constexpr wchar_t kOverlayClass[] = L"MPVMPCNativeOverlay";
 
 constexpr wchar_t kAppTitle[] = L"MPV WinterStatic Edition";
-constexpr wchar_t kVersionText[] = L"Version 0.4.10";
+constexpr wchar_t kVersionText[] = L"Version 0.4.11";
 constexpr wchar_t kProjectUrl[] = L"https://github.com/WinterStatic/MPV-WinterStatic-Edition";
 
 constexpr int kMenuHeight = 24;

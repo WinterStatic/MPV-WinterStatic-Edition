@@ -185,7 +185,7 @@ manifest="$DIST/RUNTIME-MANIFEST.txt"
     echo
     echo "This manifest records binary provenance. RUNTIME-PACKAGES.tsv contains"
     echo "the machine-readable package/version/source-base mapping used by the"
-    echo "0.4.10 release-source collector."
+    echo "0.4.11 release-source collector."
 } > "$manifest"
 
 echo "  + RUNTIME-MANIFEST.txt"

@@ -1,0 +1,30 @@
+@echo off
+rem ---------------------------------------------------------------------------
+rem Local code-signing configuration for MPV WinterStatic Edition.
+rem
+rem Copy this file to:
+rem     signing.local.cmd
+rem
+rem signing.local.cmd is git-ignored so certificate paths and local settings do
+rem not get committed. Smart App Control requires a valid RSA code-signing
+rem certificate issued by a trusted provider; a self-signed certificate is not
+rem sufficient for general SAC trust.
+rem ---------------------------------------------------------------------------
+
+rem RECOMMENDED: certificate/private key already installed in your Windows
+rem Personal certificate store. Put the certificate SHA-1 thumbprint here.
+rem Spaces in the thumbprint are normally accepted, but using it without spaces
+rem is simplest.
+rem set "WINTERSTATIC_SIGN_THUMBPRINT=0123456789ABCDEF0123456789ABCDEF01234567"
+
+rem ALTERNATIVE: PFX/P12 file. Do not commit the PFX to this repository.
+rem set "WINTERSTATIC_SIGN_PFX=C:\Path\To\WinterStatic-Code-Signing.pfx"
+rem
+rem For a password-protected PFX, preferably set the password only in the current
+rem command prompt before building:
+rem     set "WINTERSTATIC_SIGN_PFX_PASSWORD=your-password"
+rem Avoid storing the password in this file unless you understand the risk.
+
+rem RFC 3161 timestamp server. Override this with the timestamp URL recommended
+rem by your certificate provider if desired.
+set "WINTERSTATIC_TIMESTAMP_URL=http://timestamp.digicert.com"

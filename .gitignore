@@ -21,3 +21,8 @@ Release/
 # OS clutter
 Thumbs.db
 Desktop.ini
+
+# Local signing secrets/configuration
+signing.local.cmd
+*.pfx
+*.p12

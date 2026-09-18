@@ -3,16 +3,23 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "RELEASE_MODE=0"
+set "SIGN_MODE=0"
 if /I "%~1"=="release" set "RELEASE_MODE=1"
-if not "%~1"=="" if "%RELEASE_MODE%"=="0" goto :bad_argument
-title MPV WinterStatic Edition - Native Build 0.4.10
+if /I "%~1"=="signed" set "SIGN_MODE=1"
+if /I "%~1"=="signed-release" (
+    set "RELEASE_MODE=1"
+    set "SIGN_MODE=1"
+)
+if not "%~1"=="" if "%RELEASE_MODE%"=="0" if "%SIGN_MODE%"=="0" goto :bad_argument
+title MPV WinterStatic Edition - Native Build 0.4.11
 
 echo.
 echo ==========================================================
-echo   MPV WinterStatic Edition - Native Win32 Build 0.4.10
+echo   MPV WinterStatic Edition - Native Win32 Build 0.4.11
 echo ==========================================================
 echo.
 echo It compiles the Win32 frontend with MSVC and packages libmpv.
+if "%SIGN_MODE%"=="1" echo Signed mode: all packaged EXE/DLL application binaries will be Authenticode-signed.
 if "%RELEASE_MODE%"=="1" echo Release mode: matching MSYS2 runtime source will also be collected.
 echo.
 
@@ -39,6 +46,10 @@ where cl.exe >nul 2>nul
 if errorlevel 1 goto :no_msvc
 where rc.exe >nul 2>nul
 if errorlevel 1 goto :no_rc
+if "%SIGN_MODE%"=="1" (
+    where signtool.exe >nul 2>nul
+    if errorlevel 1 goto :no_signtool
+)
 
 if not exist "C:\msys64\usr\bin\bash.exe" goto :no_msys
 if not exist "C:\msys64\mingw64\bin\libmpv-2.dll" goto :no_libmpv
@@ -66,7 +77,7 @@ cl /nologo /std:c++17 /O2 /EHsc /MT /utf-8 /DUNICODE /D_UNICODE /Fo"%BUILD_OBJ%"
 if errorlevel 1 goto :build_failed
 if not exist "%BUILD_EXE%" goto :build_failed
 
-set "BASE_DIST=%CD%\MPV-WinterStatic-Edition-0.4.10-portable"
+set "BASE_DIST=%CD%\MPV-WinterStatic-Edition-0.4.11-portable"
 set "DIST=%BASE_DIST%"
 if not exist "%DIST%" goto :dist_ready
 rmdir /s /q "%DIST%" >nul 2>nul
@@ -154,7 +165,7 @@ if errorlevel 1 goto :package_failed
 
 > "%DIST%\BUILD-INFO.txt" (
   echo MPV WinterStatic Edition
-  echo Version 0.4.10
+  echo Version 0.4.11
   echo.
   echo Created by WinterStatic
   echo Developed with ChatGPT ^(OpenAI^)
@@ -162,6 +173,7 @@ if errorlevel 1 goto :package_failed
   echo Project: https://github.com/WinterStatic/MPV-WinterStatic-Edition
   echo Playback engine: libmpv ^(isolated in libmpv\^)
   echo Frontend license: GPL-3.0-or-later
+  if "%SIGN_MODE%"=="1" echo Code signing: Authenticode signing and verification requested for packaged EXE/DLL files
   echo.
   echo Root user files: settings.ini, resume.ini, mpv.conf
   echo Application information: README.txt, LICENSE, BUILD-INFO.txt
@@ -174,6 +186,12 @@ if errorlevel 1 goto :package_failed
 )
 if errorlevel 1 goto :package_failed
 if not exist "%DIST%\BUILD-INFO.txt" goto :package_failed
+
+if "%SIGN_MODE%"=="1" (
+    echo [sign] Authenticode-signing packaged application binaries...
+    call :sign_portable
+    if errorlevel 1 goto :sign_failed
+)
 
 if not "%RELEASE_MODE%"=="1" goto :release_source_done
 call :collect_release_source
@@ -214,12 +232,89 @@ echo.
 pause
 exit /b 0
 
+:sign_portable
+if not exist "%CD%\signing.local.cmd" (
+    echo.
+    echo ERROR: Signed build requested, but signing.local.cmd was not found.
+    echo Copy signing.local.cmd.example to signing.local.cmd and configure your
+    echo trusted RSA code-signing certificate. The local file is git-ignored.
+    exit /b 1
+)
+
+call "%CD%\signing.local.cmd"
+if errorlevel 1 (
+    echo ERROR: signing.local.cmd returned an error.
+    exit /b 1
+)
+
+if not defined WINTERSTATIC_TIMESTAMP_URL set "WINTERSTATIC_TIMESTAMP_URL=http://timestamp.digicert.com"
+
+if defined WINTERSTATIC_SIGN_THUMBPRINT goto :sign_credentials_ready
+if defined WINTERSTATIC_SIGN_PFX goto :check_sign_pfx
+
+echo.
+echo ERROR: No code-signing certificate is configured.
+echo Set WINTERSTATIC_SIGN_THUMBPRINT or WINTERSTATIC_SIGN_PFX in signing.local.cmd.
+exit /b 1
+
+:check_sign_pfx
+if not exist "%WINTERSTATIC_SIGN_PFX%" (
+    echo.
+    echo ERROR: Configured PFX file was not found:
+    echo   %WINTERSTATIC_SIGN_PFX%
+    exit /b 1
+)
+
+:sign_credentials_ready
+echo   Timestamp: %WINTERSTATIC_TIMESTAMP_URL%
+for /R "%DIST%" %%F in (*.exe) do (
+    call :sign_one "%%~fF"
+    if errorlevel 1 exit /b 1
+)
+for /R "%DIST%" %%F in (*.dll) do (
+    call :sign_one "%%~fF"
+    if errorlevel 1 exit /b 1
+)
+
+echo [sign] Signature verification passed for all packaged EXE/DLL files.
+exit /b 0
+
+:sign_one
+set "SIGN_FILE=%~1"
+
+rem Preserve a valid existing Authenticode signature on third-party binaries.
+signtool verify /pa /q "%SIGN_FILE%" >nul 2>nul
+if not errorlevel 1 (
+    echo   = already valid: %~nx1
+    exit /b 0
+)
+
+echo   + signing: %~nx1
+if defined WINTERSTATIC_SIGN_THUMBPRINT (
+    signtool sign /fd SHA256 /sha1 "%WINTERSTATIC_SIGN_THUMBPRINT%" /tr "%WINTERSTATIC_TIMESTAMP_URL%" /td SHA256 /d "MPV WinterStatic Edition" "%SIGN_FILE%"
+) else (
+    if defined WINTERSTATIC_SIGN_PFX_PASSWORD (
+        signtool sign /fd SHA256 /f "%WINTERSTATIC_SIGN_PFX%" /p "%WINTERSTATIC_SIGN_PFX_PASSWORD%" /tr "%WINTERSTATIC_TIMESTAMP_URL%" /td SHA256 /d "MPV WinterStatic Edition" "%SIGN_FILE%"
+    ) else (
+        signtool sign /fd SHA256 /f "%WINTERSTATIC_SIGN_PFX%" /tr "%WINTERSTATIC_TIMESTAMP_URL%" /td SHA256 /d "MPV WinterStatic Edition" "%SIGN_FILE%"
+    )
+)
+if errorlevel 1 exit /b 1
+
+signtool verify /pa /q "%SIGN_FILE%"
+if errorlevel 1 (
+    echo ERROR: Signature verification failed for:
+    echo   %SIGN_FILE%
+    exit /b 1
+)
+exit /b 0
+
 :collect_release_source
 echo [release] Collecting exact MSYS2 runtime source archives...
-set "SOURCE_DIR=%CD%\MPV-WinterStatic-Edition-0.4.10-runtime-source"
-set "SOURCE_ZIP=%CD%\MPV-WinterStatic-Edition-0.4.10-Runtime-Source.zip"
-set "SOURCE_DIR_FWD=%CD:\=/%/MPV-WinterStatic-Edition-0.4.10-runtime-source"
-set "SOURCE_ZIP_FWD=%CD:\=/%/MPV-WinterStatic-Edition-0.4.10-Runtime-Source.zip"
+set "SOURCE_DIR=%CD%\MPV-WinterStatic-Edition-0.4.11-runtime-source"
+set "SOURCE_ZIP=%CD%\MPV-WinterStatic-Edition-0.4.11-Runtime-Source.zip"
+set "SOURCE_DIR_FWD=%CD:\=/%/MPV-WinterStatic-Edition-0.4.11-runtime-source"
+set "SOURCE_ZIP_FWD=%CD:\=/%/MPV-WinterStatic-Edition-0.4.11-Runtime-Source.zip"
 "C:\msys64\usr\bin\bash.exe" -lc "export PATH=/mingw64/bin:/usr/bin:$PATH; cd '%ROOT_FWD%'; ./collect-runtime-source.sh '%LIBMPV_FWD%' '%SOURCE_DIR_FWD%' '%SOURCE_ZIP_FWD%'"
 exit /b %ERRORLEVEL%
 
@@ -244,6 +339,12 @@ goto :fail_pause
 :no_rc
 echo.
 echo ERROR: rc.exe was not found. The Windows SDK component is missing.
+goto :fail_pause
+
+:no_signtool
+echo.
+echo ERROR: signtool.exe was not found.
+echo Install a Windows SDK component that includes SignTool, then retry.
 goto :fail_pause
 
 :no_msys
@@ -279,8 +380,25 @@ echo.
 echo Normal build:
 echo   build-native.bat
 echo.
+echo Signed portable build:
+echo   build-native.bat signed
+echo.
 echo Public-release build with matching runtime source collection:
 echo   build-native.bat release
+echo.
+echo Signed public-release build:
+echo   build-native.bat signed-release
+goto :fail_pause
+
+:sign_failed
+echo.
+echo ==========================================================
+echo CODE SIGNING FAILED
+echo ==========================================================
+echo The portable folder was created but must NOT be treated as a signed build.
+echo Check signing.local.cmd, certificate access, timestamp service, and the
+echo SignTool output above. No unsigned fallback is performed in signed mode.
+if defined BUILD_WORK echo Temporary build files remain at: %BUILD_WORK%
 goto :fail_pause
 
 :source_package_failed

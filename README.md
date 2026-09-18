@@ -1,5 +1,5 @@
 MPV WinterStatic Edition
-Version 0.4.10
+Version 0.4.11
 ============================
 
 MPV WinterStatic Edition is a lightweight native Win32 frontend for libmpv.
@@ -75,7 +75,7 @@ Run:
 
 When successful, the build creates:
 
-    MPV-WinterStatic-Edition-0.4.10-portable
+    MPV-WinterStatic-Edition-0.4.11-portable
 
 If that folder already exists and cannot be replaced, the build script may add
 a numeric suffix.
@@ -101,8 +101,8 @@ exact installed version.
 
 A successful release-mode build additionally creates:
 
-    MPV-WinterStatic-Edition-0.4.10-runtime-source\
-    MPV-WinterStatic-Edition-0.4.10-Runtime-Source.zip
+    MPV-WinterStatic-Edition-0.4.11-runtime-source\
+    MPV-WinterStatic-Edition-0.4.11-Runtime-Source.zip
 
 The source bundle contains:
 
@@ -120,6 +120,35 @@ and tells you not to publish that Full Portable binary until the source bundle
 can be completed.
 
 Release mode requires internet access to mirror.msys2.org. Normal builds do not.
+
+CODE SIGNING / SMART APP CONTROL
+--------------------------------
+
+The build also supports explicit Authenticode-signed modes:
+
+    build-native.bat signed
+    build-native.bat signed-release
+
+`signing.local.cmd.example` documents the one-time local certificate setup. Copy
+it to `signing.local.cmd` and configure a trusted RSA code-signing certificate by
+Windows certificate-store thumbprint or PFX path. The local file and PFX/P12
+files are git-ignored. Passwords should preferably be supplied only in the current
+terminal session rather than stored in the repository.
+
+Signed mode runs after the portable runtime has been collected. It preserves any
+valid existing Authenticode signatures, signs the remaining packaged EXE/DLL
+application binaries with SHA-256 plus an RFC 3161 timestamp, and verifies every
+new signature. A signing or verification failure is fatal; there is no silent
+unsigned fallback.
+
+A self-signed certificate does not provide general Smart App Control trust on
+other PCs. For Windows 11 Smart App Control, use a trusted RSA code-signing
+certificate. See `CODE-SIGNING.md` for details.
+
+For a public GitHub binary release intended to work cleanly with Smart App Control,
+use `build-native.bat signed-release` and upload the resulting signed portable
+package. GitHub hosting does not itself sign or establish publisher trust for
+an unsigned executable.
 
 The portable runtime is deliberately separated into two ownership areas:
 
@@ -398,7 +427,7 @@ Executable:
 
 The About dialog identifies this build as:
 
-    Version 0.4.10
+    Version 0.4.11
 
 The About dialog also credits:
 
@@ -431,6 +460,16 @@ compliance work.
 
 VERSION HISTORY
 ---------------
+
+0.4.11 CODE SIGNING / SMART APP CONTROL RELEASE PREP
+------------------------------------------------------------------
+- Added explicit signed and signed-release build modes for Authenticode signing.
+- Added strict signature verification with no silent unsigned fallback.
+- Added git-ignored local signing configuration and code-signing documentation.
+- Prepared the public-release workflow for trusted RSA code signing so GitHub
+  binary releases can satisfy Windows 11 Smart App Control publisher checks.
+- Bumped application, resource, manifest, package, and release-source metadata
+  to 0.4.11 so this build extracts into its own versioned folder.
 
 0.4.10 TASKBAR MODES / OPTIONAL PLAYLIST BUTTONS
 ------------------------------------------------------------------
@@ -1423,3 +1462,4 @@ No playback, UI, settings, or packaging behavior is otherwise changed.
 ---------------------------
 - Experimental Qt-based frontend prototype.
 - Superseded by the native Win32/libmpv branch introduced in 0.2.0.
+
